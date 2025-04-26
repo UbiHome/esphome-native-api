@@ -1,12 +1,7 @@
-use std::fs;
-use std::io::Error;
-
-use std::path::{Path, PathBuf};
-
 fn main() {
     let mut config = prost_build::Config::new();
     // config.skip_debug(&["."]);
-    config.out_dir("../src/generated");
+    config.out_dir("../src/proto");
     config.include_file("mod.rs");
     config.compile_protos(&["src/protos/api.proto"], &["./src/protos/"]).unwrap();
 

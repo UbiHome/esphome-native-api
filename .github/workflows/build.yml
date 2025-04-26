@@ -31,6 +31,10 @@ jobs:
     - name: Add Protobuf
       run: sudo apt install -y protobuf-compiler
     - name: Build
+      run: | 
+        cd generator
+        cargo run
+    - name: Build
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
