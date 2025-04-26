@@ -1,9 +1,8 @@
 [package]
 name = "esphome-native-api"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 license = "MIT"
-license-file = "LICENSE"
 keywords = ["esphome", "homeassistant"]
 homepage = "https://github.com/DanielHabenicht/esphome-native-api"
 repository = "https://github.com/DanielHabenicht/esphome-native-api"
