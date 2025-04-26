@@ -1,4 +1,4 @@
-use crate::greeter::{
+use crate::proto::{
     ConnectRequest, ConnectResponse, HelloRequest, HelloResponse,
     DisconnectRequest,
 DisconnectResponse,

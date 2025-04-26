@@ -1,6 +1,6 @@
 [package]
 name = "esphome-native-api"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 license = "MIT"
 license-file = "LICENSE"
@@ -9,11 +9,16 @@ homepage = "https://github.com/DanielHabenicht/esphome-native-api"
 repository = "https://github.com/DanielHabenicht/esphome-native-api"
 readme = "README.md"
 description = "Another package for communication via esp home native API."
+include = [
+    "LICENSE",
+    "README.md",
+    "Cargo.toml",
+    "Cargo.lock",
+    "src/*"
+]
 
 [dependencies]
 log = "0.4"
 tokio = { version = "1", features = ["full"] }
 prost = "0.13.5"
 
-[build-dependencies]
-prost-build = "0.13"

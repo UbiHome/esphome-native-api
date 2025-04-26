@@ -1,4 +1,6 @@
-use greeter::{EntityCategory, SensorLastResetType, SensorStateClass};
+mod parser;
+mod proto;
+
 use log::debug;
 use parser::ProtoMessage;
 use std::{future::Future, pin::Pin, str};
@@ -6,14 +8,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::broadcast::Sender;
-mod parser;
+use proto::{SensorStateClass, SensorLastResetType, EntityCategory};
 
-include!(concat!(env!("OUT_DIR"), "/_.rs"));
-pub mod greeter {
-    include!(concat!(env!("OUT_DIR"), "/greeter.rs"));
-}
-
-async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     let addr = "0.0.0.0:6053".to_string();
 
     // Next up we create a TCP listener which will listen for incoming
@@ -73,7 +70,7 @@ async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                                 hello_request.client_info
                             );
                             println!("HelloRequest: {:?}", hello_request);
-                            let response_message = greeter::HelloResponse {
+                            let response_message = proto::HelloResponse {
                                 api_version_major: 1,
                                 api_version_minor: 10,
                                 server_info: "Hello from Rust gRPC server".to_string(),
@@ -88,7 +85,7 @@ async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         ProtoMessage::DeviceInfoRequest(device_info_request) => {
                             println!("DeviceInfoRequest: {:?}", device_info_request);
-                            let response_message = greeter::DeviceInfoResponse {
+                            let response_message = proto::DeviceInfoResponse {
                                 uses_password: false,
                                 name: "Hello".to_owned(),
                                 mac_address: "aa:bb:cc:dd:ee:ff".to_owned(),
@@ -117,7 +114,7 @@ async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         ProtoMessage::ConnectRequest(connect_request) => {
                             println!("ConnectRequest: {:?}", connect_request);
-                            let response_message = greeter::ConnectResponse {
+                            let response_message = proto::ConnectResponse {
                                 invalid_password: false,
                             };
                             answer_buf = [
@@ -129,7 +126,7 @@ async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
                         ProtoMessage::DisconnectRequest(disconnect_request) => {
                             println!("DisconnectRequest: {:?}", disconnect_request);
-                            let response_message = greeter::DisconnectResponse {};
+                            let response_message = proto::DisconnectResponse {};
                             answer_buf = [
                                 answer_buf,
                                 to_packet(ProtoMessage::DisconnectResponse(response_message))
@@ -141,7 +138,7 @@ async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                         ProtoMessage::ListEntitiesRequest(list_entities_request) => {
                             println!("ListEntitiesRequest: {:?}", list_entities_request);
 
-                            let sensor = greeter::ListEntitiesSensorResponse {
+                            let sensor = proto::ListEntitiesSensorResponse {
                                 object_id: "sensor_1".to_string(),
                                 key: 1,
                                 name: "Example Sensor".to_string(),
@@ -157,7 +154,7 @@ async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                                 entity_category: EntityCategory::Config as i32,
                             };
 
-                            let response_message = greeter::ListEntitiesDoneResponse {};
+                            let response_message = proto::ListEntitiesDoneResponse {};
                             answer_buf = [
                                 answer_buf,
                                 to_packet(ProtoMessage::ListEntitiesSensorResponse(sensor))
@@ -169,7 +166,7 @@ async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         ProtoMessage::PingRequest(ping_request) => {
                             println!("PingRequest: {:?}", ping_request);
-                            let response_message = greeter::PingResponse {};
+                            let response_message = proto::PingResponse {};
                             answer_buf = [
                                 answer_buf,
                                 to_packet(ProtoMessage::PingResponse(response_message)).unwrap(),

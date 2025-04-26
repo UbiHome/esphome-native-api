@@ -1,0 +1,8 @@
+[package]
+name = "generator"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+prost-build = "0.13.5"
+protobuf-codegen = "3.7.2"

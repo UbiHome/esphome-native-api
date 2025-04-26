@@ -1,7 +1,5 @@
 syntax = "proto3";
 
-package greeter;
-
 import "api_options.proto";
 
 service APIConnection {
