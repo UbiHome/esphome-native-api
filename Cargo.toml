@@ -9,11 +9,12 @@ repository = "https://github.com/DanielHabenicht/esphome-native-api"
 readme = "README.md"
 description = "Another package for communication via esp home native API."
 include = [
-    "LICENSE",
-    "README.md",
-    "Cargo.toml",
-    "Cargo.lock",
-    "src/*"
+    "/LICENSE",
+    "/README.md",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/src/*",
+    "!/src/proto/.gitignore"
 ]
 
 [dependencies]
