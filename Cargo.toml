@@ -2,6 +2,13 @@
 name = "esphome-native-api"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+license-file = "LICENSE"
+keywords = ["esphome", "homeassistant"]
+homepage = "https://github.com/DanielHabenicht/esphome-native-api"
+repository = "https://github.com/DanielHabenicht/esphome-native-api"
+readme = "README.md"
+description = "Another package for communication via esp home native API."
 
 [dependencies]
 log = "0.4"
