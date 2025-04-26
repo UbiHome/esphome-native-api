@@ -20,7 +20,7 @@
 		"terminal.integrated.shell.linux": "/bin/bash"
 		}
 	},
-	"postCreateCommand": "rustup component add rustfmt clippy && cargo build",
+	"postCreateCommand": "sudo apt-get update && apt-get install protobuf-compiler -y && rustup component add rustfmt clippy && cargo build",
 	"features": {
 			"ghcr.io/devcontainers/features/rust:1": {}
 	}
