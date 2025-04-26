@@ -1,5 +1,5 @@
 pub mod parser;
-mod proto;
+pub mod proto;
 
 use log::debug;
 use parser::ProtoMessage;
