@@ -4,6 +4,27 @@
     "@semantic-release/commit-analyzer",
     "@semantic-release/release-notes-generator",
     [
+      "semantic-release-replace-plugin",
+      {
+        "replacements": [
+          {
+            "files": ["Cargo.toml"],
+            "from": "^version = \".*\"",
+            "to": "version = \"${nextRelease.version}\"",
+            "results": [
+              {
+                "file": "Cargo.toml",
+                "hasChanged": true,
+                "numMatches": 1,
+                "numReplacements": 1
+              }
+            ],
+            "countMatches": true
+          }
+        ]
+      }
+    ],
+    [
         "@semantic-release/exec",
         {
           "verifyConditionsCmd": "cargo check",

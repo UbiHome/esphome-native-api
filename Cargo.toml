@@ -1,6 +1,6 @@
 [package]
 name = "esphome-native-api"
-version = "0.0.3"
+version = "0.0.0"
 edition = "2024"
 license = "MIT"
 keywords = ["esphome", "homeassistant"]

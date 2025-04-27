@@ -4,6 +4,7 @@
   },
   "devDependencies": {
     "@semantic-release/exec": "^7.0.3",
-    "semantic-release": "^24.2.3"
+    "semantic-release": "^24.2.3",
+    "semantic-release-replace-plugin": "^1.2.7"
   }
 }
