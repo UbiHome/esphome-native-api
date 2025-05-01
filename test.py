@@ -1,3 +1,4 @@
+from pprint import pp
 import aioesphomeapi
 import asyncio
 
@@ -21,7 +22,7 @@ async def main():
 
     # List all entities of the device
     entities = await api.list_entities_services()
-    print(entities)
+    pp(entities)
 
     await api.disconnect()
 
