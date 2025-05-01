@@ -5,8 +5,8 @@ async def main():
     """Connect to an ESPHome device and get details."""
 
     # Establish connection
-    api = aioesphomeapi.APIClient("localhost", 6053, "MyPassword")
-    await api.connect(login=False)
+    api = aioesphomeapi.APIClient("192.168.178.33", 6053, "MyPassword")
+    await api.connect(login=True)
 
     # api = aioesphomeapi.APIClient("bluetooth-proxy.local", 6053, "test", noise_psk="aMzEtMWQtR3zQ0hq3Ll3dnJ7emjpkC+Gm7oxf4heFiI=")
     # await api.connect(login=False)

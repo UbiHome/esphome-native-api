@@ -125,7 +125,7 @@ use prost::Message;
 macro_rules! proto_message_mappings {
     ($($type_id:expr => $struct:ident),* $(,)?) => {
         // Generate the ProtoMessage enum
-        #[derive(Debug)]
+        #[derive(Clone, Debug)]
         pub enum ProtoMessage {
             $(
                 $struct($struct),
