@@ -5,10 +5,8 @@ all: build
 
 # Build the Cargo package
 build:
-	cd generator
-	cargo run
-	cd ..
-	cargo build --release
+	cd generator && cargo run
+	cargo build
 
 # Clean the build artifacts
 clean:
