@@ -7,17 +7,16 @@
 From: https://github.com/esphome/aioesphomeapi/blob/main/aioesphomeapi/connection.py#L700
 https://github.com/esphome/aioesphomeapi/blob/main/aioesphomeapi/_frame_helper/plain_text.py#L41
 
-| Part | Description         | Example                                                  |
-| ---- | ------------------- | -------------------------------------------------------- |
+| Part | Description                 | Example                                                  |
+| ---- | --------------------------- | -------------------------------------------------------- |
 | 0    | Preamble (always zero byte) | `0x00`                                                   |
-| 1    | Message Length      | `0x00`                                                   |
-| 2    | Message Type        | 0x01 (Internal number for identifying the proto message) |
-| 3-X  | Content             |
+| 1    | Message Length              | `0x00`                                                   |
+| 2    | Message Type                | 0x01 (Internal number for identifying the proto message) |
+| 3-X  | Content                     |
 
 Message Types: (https://github.com/esphome/aioesphomeapi/blob/main/aioesphomeapi/core.py#L290)
 
-
-``` mermaid
+```mermaid
 ---
 title: "Native API Packet"
 ---
@@ -28,7 +27,6 @@ packet-beta
   3-31: "Protobuf Content"
 ```
 
-
 ## Example Communication
 
 ```mermaid
@@ -37,7 +35,7 @@ sequenceDiagram
     Api->>Client: HelloResponse
     Client->>Api: DisconnectRequest
 
-    
+
     Client->>Api: ConnectRequest
     Api->>Client: ConnectResponse
     Client->>Api: DeviceInfoRequest
@@ -60,4 +58,4 @@ sequenceDiagram
 ## Entities
 
 - Sensor
-https://github.com/esphome/aioesphomeapi/blob/e14b6ec9315695ba13e7cf6b750bc892b77a0a2e/aioesphomeapi/model.py#L433
+  https://github.com/esphome/aioesphomeapi/blob/e14b6ec9315695ba13e7cf6b750bc892b77a0a2e/aioesphomeapi/model.py#L433

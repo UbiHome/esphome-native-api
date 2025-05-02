@@ -65,7 +65,7 @@ jobs:
           target: ${{ matrix.platform.target }}
           # Add "--locked" again when release please is not updating all Cargo.toml files
           args: "--release"
-          strip: true
+          strip: false
 
       - name: Test binary
         uses: houseabsolute/actions-rust-cross@v1
@@ -74,8 +74,8 @@ jobs:
           target: ${{ matrix.platform.target }}
           # Add "--locked" again when release please is not updating all Cargo.toml files
           args: "--verbose"
-          strip: true
-          
+          strip: false
+
   release:
     runs-on: ubuntu-latest
     environment: release
