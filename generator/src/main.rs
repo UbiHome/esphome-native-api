@@ -1,22 +1,88 @@
-fn main() {
-    let mut config = prost_build::Config::new();
-    // config.skip_debug(&["."]);
-    config.out_dir("../src/proto");
-    config.include_file("mod.rs");
-    config.compile_protos(&["src/protos/api.proto"], &["./src/protos/"]).unwrap();
+use octocrab::Octocrab;
+use std::fs;
+use std::path::Path;
+use std::env;
+
+#[tokio::main]
+async fn main() {
+    
+    let mut octocrab: Octocrab = (*octocrab::instance()).clone();
+    if env::var("GITHUB_TOKEN").is_ok() {
+        println!("Using token");
+        let token = env::var("GITHUB_TOKEN").unwrap();
+        octocrab = octocrab.user_access_token(token).unwrap();
+    }
 
 
-    // protobuf_codegen::Codegen::new()
-    //     // Use `protoc` parser
-    //     .protoc()
-    //     // .protoc_path(&Path::new("/usr/local/bin/protoc"))
-    //     // All inputs and imports from the inputs must reside in `includes` directories.
-    //     .includes(&["src/protos"])
-    //     // Path::new("/usr/local/include/google/protobuf/").to_owned(),
-    //     // Inputs must reside in some of include paths.
-    //     // .input("src/protos/apple.proto")
-    //     .input("src/protos/api.proto")
-    //     // Specify output directory
-    //     .out_dir("../src/generated")
-    //     .run_from_script();
+    let mut page = octocrab
+        .repos("esphome", "esphome")
+        .releases()
+        .list()
+        .per_page(50)
+        .send()
+        .await
+        .unwrap();
+
+    for release in &page {
+        if release.tag_name.contains("b"){
+            println!("Skipping {}", &release.tag_name);
+            continue;
+        }
+
+
+        println!("{}", &release.tag_name);
+        let dir = format!("protos/{}", release.tag_name);
+        let protos_dir = Path::new(dir.as_str());
+        fs::create_dir_all(protos_dir).unwrap();
+
+        let api_proto = octocrab
+            .repos("esphome", "esphome")
+            .get_content()
+            .path("esphome/components/api/api.proto")
+            .r#ref(release.tag_name.clone())
+            .send()
+            .await
+            .unwrap();
+
+        if let Some(item) = &api_proto.items.first() {
+            let decoded_content = item.decoded_content().unwrap();
+            let file_path = protos_dir.join("api.proto");
+            fs::write(file_path, decoded_content).unwrap();
+            println!("Decoded content written to protos/api.proto");
+        } else {
+            println!("No content found in the API response.");
+        }
+
+        let api_proto_options = octocrab
+            .repos("esphome", "esphome")
+            .get_content()
+            .path("esphome/components/api/api_options.proto")
+            .r#ref(release.tag_name.clone())
+            .send()
+            .await
+            .unwrap();
+
+        if let Some(item) = &api_proto_options.items.first() {
+            let decoded_content = item.decoded_content().unwrap();
+            let file_path = protos_dir.join("api_options.proto");
+            fs::write(file_path, decoded_content).unwrap();
+            println!("Decoded content written to protos/api.proto");
+        } else {
+            println!("No content found in the API response.");
+        }
+
+        let package_name = format!("version_{}", release.tag_name.clone()).replace(".", "_");
+        let write_dir = format!("../src/proto/{}", package_name);
+        let write_protos_dir = Path::new(write_dir.as_str());
+        fs::create_dir_all(write_protos_dir).unwrap();
+
+        let mut config = prost_build::Config::new();
+        // config.skip_debug(&["."]);
+        config.default_package_filename(package_name);
+        config.out_dir(write_protos_dir);
+        config.include_file("mod.rs");
+        config.compile_protos(&[format!("{}/api.proto", dir)], &[dir]).unwrap();
+        break;
+    }
+
 }

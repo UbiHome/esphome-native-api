@@ -5,7 +5,7 @@ use log::debug;
 use parser::ProtoMessage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use proto::{SensorStateClass, SensorLastResetType, EntityCategory};
+use proto::version_2025_4_1::{ConnectResponse, DeviceInfoResponse, DisconnectResponse, EntityCategory, HelloResponse, ListEntitiesDoneResponse, ListEntitiesSensorResponse, PingResponse, SensorLastResetType, SensorStateClass};
 
 pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     let addr = "0.0.0.0:6053".to_string();
@@ -67,7 +67,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                                 hello_request.client_info
                             );
                             println!("HelloRequest: {:?}", hello_request);
-                            let response_message = proto::HelloResponse {
+                            let response_message = HelloResponse {
                                 api_version_major: 1,
                                 api_version_minor: 10,
                                 server_info: "Hello from Rust gRPC server".to_string(),
@@ -82,7 +82,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         ProtoMessage::DeviceInfoRequest(device_info_request) => {
                             println!("DeviceInfoRequest: {:?}", device_info_request);
-                            let response_message = proto::DeviceInfoResponse {
+                            let response_message = DeviceInfoResponse {
                                 uses_password: false,
                                 name: "Hello".to_owned(),
                                 mac_address: "aa:bb:cc:dd:ee:ff".to_owned(),
@@ -111,7 +111,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         ProtoMessage::ConnectRequest(connect_request) => {
                             println!("ConnectRequest: {:?}", connect_request);
-                            let response_message = proto::ConnectResponse {
+                            let response_message = ConnectResponse {
                                 invalid_password: false,
                             };
                             answer_buf = [
@@ -123,7 +123,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
                         ProtoMessage::DisconnectRequest(disconnect_request) => {
                             println!("DisconnectRequest: {:?}", disconnect_request);
-                            let response_message = proto::DisconnectResponse {};
+                            let response_message = DisconnectResponse {};
                             answer_buf = [
                                 answer_buf,
                                 to_packet(ProtoMessage::DisconnectResponse(response_message))
@@ -135,7 +135,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                         ProtoMessage::ListEntitiesRequest(list_entities_request) => {
                             println!("ListEntitiesRequest: {:?}", list_entities_request);
 
-                            let sensor = proto::ListEntitiesSensorResponse {
+                            let sensor = ListEntitiesSensorResponse {
                                 object_id: "sensor_1".to_string(),
                                 key: 1,
                                 name: "Example Sensor".to_string(),
@@ -146,12 +146,12 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                                 force_update: false,
                                 device_class: "temperature".to_string(),
                                 state_class: SensorStateClass::StateClassMeasurement as i32,
-                                last_reset_type: SensorLastResetType::LastResetNone as i32,
+                                legacy_last_reset_type: SensorLastResetType::LastResetNone as i32,
                                 disabled_by_default: false,
                                 entity_category: EntityCategory::Config as i32,
                             };
 
-                            let response_message = proto::ListEntitiesDoneResponse {};
+                            let response_message = ListEntitiesDoneResponse {};
                             answer_buf = [
                                 answer_buf,
                                 to_packet(ProtoMessage::ListEntitiesSensorResponse(sensor))
@@ -163,7 +163,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         ProtoMessage::PingRequest(ping_request) => {
                             println!("PingRequest: {:?}", ping_request);
-                            let response_message = proto::PingResponse {};
+                            let response_message = PingResponse {};
                             answer_buf = [
                                 answer_buf,
                                 to_packet(ProtoMessage::PingResponse(response_message)).unwrap(),
