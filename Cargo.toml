@@ -4,6 +4,7 @@ version = "0.0.0"
 edition = "2024"
 license = "MIT"
 keywords = ["esphome", "homeassistant"]
+categories = ["api-bindings"]
 homepage = "https://github.com/DanielHabenicht/esphome-native-api"
 repository = "https://github.com/DanielHabenicht/esphome-native-api"
 readme = "README.md"
