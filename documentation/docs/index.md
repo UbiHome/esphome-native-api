@@ -1,3 +1,9 @@
+---
+hide:
+  - navigation
+  - toc
+---
+
 # Missing Native API Documentation
 
 - TCP Based
@@ -15,6 +21,16 @@ https://github.com/esphome/aioesphomeapi/blob/main/aioesphomeapi/_frame_helper/p
 | 3-X  | Content                     |
 
 Message Types: (https://github.com/esphome/aioesphomeapi/blob/main/aioesphomeapi/core.py#L290)
+
+
+``` mermaid
+graph LR
+  A[Start] --> B{Error?};
+  B -->|Yes| C[Hmm...];
+  C --> D[Debug];
+  D --> B;
+  B ---->|No| E[Yay!];
+```
 
 ```mermaid
 ---

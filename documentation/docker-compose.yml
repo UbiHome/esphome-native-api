@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  mkdocs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mkdocs-material-native-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/docs
+
+  # build:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: mkdocs-material-native-api-build
+  #   ports:
+  #     - "8000:8000"
+  #   volumes:
+  #     - ./:/docs
+  #   command: build
