@@ -1,3 +1,6 @@
 .cache
 __pycache__
 site/
+
+# Copied on build from README.md
+docs/index.md

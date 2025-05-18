@@ -1,2 +1,4 @@
 nav:
   - Home: index.md
+  - Native API Docs: 
+     - native_api/**
