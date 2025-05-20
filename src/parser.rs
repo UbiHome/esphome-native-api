@@ -1,4 +1,4 @@
-use crate::proto::version_2025_4_1::{
+use crate::proto::version_2025_4_2::{
     ConnectRequest, ConnectResponse, HelloRequest, HelloResponse,
     DisconnectRequest,
 DisconnectResponse,

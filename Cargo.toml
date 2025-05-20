@@ -26,3 +26,12 @@ prost = "0.13.5"
 [workspace]
 resolver = "2"
 members = ["generator"]
+
+[dev-dependencies]
+pretty_env_logger = "0.5.0"
+
+
+
+[features]
+default = ["version_2025_4_2"]
+version_2025_4_2 = []

@@ -1,11 +1,12 @@
 pub mod parser;
 pub mod proto;
+pub mod server;
 
 use log::debug;
 use parser::ProtoMessage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use proto::version_2025_4_1::{ConnectResponse, DeviceInfoResponse, DisconnectResponse, EntityCategory, HelloResponse, ListEntitiesDoneResponse, ListEntitiesSensorResponse, PingResponse, SensorLastResetType, SensorStateClass};
+use proto::version_2025_4_2::{ConnectResponse, DeviceInfoResponse, DisconnectResponse, EntityCategory, HelloResponse, ListEntitiesDoneResponse, ListEntitiesSensorResponse, PingResponse, SensorLastResetType, SensorStateClass};
 
 pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     let addr = "0.0.0.0:6053".to_string();
