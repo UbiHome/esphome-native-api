@@ -34,7 +34,7 @@ async fn main() {
             continue;
         }
         // Only till this release:
-        if &release.tag_name == "2025.6.2" {
+        if &release.tag_name == "2025.2.1" {
             break;
         }
 
