@@ -37,6 +37,12 @@ jobs:
           name: proto_src_files
           path: src/proto
 
+      - name: Upload cargo.toml
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo_toml
+          path: Cargo.toml
+
   test:
     name: Test - ${{ matrix.platform.os-name }}
     needs: generate_protos
@@ -82,6 +88,12 @@ jobs:
         with:
           name: proto_src_files
           path: src/proto
+
+      - name: Download cargo.toml
+        uses: actions/download-artifact@v4
+        with:
+          name: cargo_toml
+          
       - name: Build binary
         uses: houseabsolute/actions-rust-cross@v1
         with:
