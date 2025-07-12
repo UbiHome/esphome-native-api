@@ -83,7 +83,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download math result for job 2
+      - name: Download proto source files
         uses: actions/download-artifact@v4
         with:
           name: proto_src_files
