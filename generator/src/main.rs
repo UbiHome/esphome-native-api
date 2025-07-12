@@ -33,6 +33,10 @@ async fn main() {
             println!("Skipping {}", &release.tag_name);
             continue;
         }
+        // Only till this release:
+        if &release.tag_name == "2025.6.2" {
+            break;
+        }
 
 
         println!("{}", &release.tag_name);
@@ -85,11 +89,10 @@ async fn main() {
 
         let mut config = prost_build::Config::new();
         // config.skip_debug(&["."]);
-        config.default_package_filename(package_name);
+        config.default_package_filename(&package_name);
         config.out_dir(write_protos_dir);
         config.include_file("mod.rs");
         config.compile_protos(&[format!("{}/api.proto", dir)], &[dir]).unwrap();
-        break;
     }
 
     let mod_file = Path::new(root_output_dir).join("mod.rs");
