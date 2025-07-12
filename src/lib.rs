@@ -3,7 +3,7 @@ pub mod proto;
 pub mod server;
 
 use log::debug;
-use parser::ProtoMessage;
+pub use parser::ProtoMessage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use proto::version_2025_4_2::{ConnectResponse, DeviceInfoResponse, DisconnectResponse, EntityCategory, HelloResponse, ListEntitiesDoneResponse, ListEntitiesSensorResponse, PingResponse, SensorLastResetType, SensorStateClass};

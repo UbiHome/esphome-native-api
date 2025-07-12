@@ -1,82 +1,110 @@
 use crate::parser;
 use crate::parser::ProtoMessage;
-use crate::proto;
-use crate::proto::version_2025_4_2::BluetoothServiceData;
 use crate::proto::version_2025_4_2::ConnectResponse;
 use crate::proto::version_2025_4_2::DeviceInfoResponse;
 use crate::proto::version_2025_4_2::DisconnectResponse;
-use crate::proto::version_2025_4_2::EntityCategory;
 use crate::proto::version_2025_4_2::HelloResponse;
 use crate::proto::version_2025_4_2::ListEntitiesDoneResponse;
 use crate::proto::version_2025_4_2::PingResponse;
-use crate::proto::version_2025_4_2::SensorLastResetType;
-use crate::proto::version_2025_4_2::SensorStateClass;
 use crate::proto::version_2025_4_2::SubscribeHomeAssistantStateResponse;
 use crate::proto::version_2025_4_2::SubscribeLogsResponse;
 use crate::to_packet_from_ref;
 use log::debug;
-use log::error;
-use log::info;
 use log::trace;
-use log::warn;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::num::ParseIntError;
+use std::str;
 use std::sync::mpsc;
-use std::{future::Future, pin::Pin, str};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpSocket;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::broadcast::Sender;
+use typed_builder::TypedBuilder;
+use constant_time_eq::constant_time_eq;
 
+#[derive(TypedBuilder)]
 pub struct Server {
-    pub(crate) address: String,
+    // Private fields
+    #[builder(default, mutable_during_default_resolution, setter(skip))]
+    answer_messages_tx: Option<Sender<ProtoMessage>>,
+    #[builder(default, mutable_during_default_resolution, setter(skip))]
+    answer_messages_rx: Option<Receiver<ProtoMessage>>,
+    #[builder(default, mutable_during_default_resolution, setter(skip))]
+    messages_tx: Option<Sender<ProtoMessage>>,
+    #[builder(default, mutable_during_default_resolution, setter(skip))]
+    messages_rx: Option<Receiver<ProtoMessage>>,
+
+    #[builder(default, mutable_during_default_resolution, setter(skip))]
+    tx: Option<mpsc::Sender<ProtoMessage>>,
+    #[builder(default, mutable_during_default_resolution, setter(skip))]
+    rx: Option<mpsc::Receiver<ProtoMessage>>,
+
+    #[builder(default=HashMap::new(), setter(skip))]
     pub(crate) components_by_key: HashMap<u32, ProtoMessage>,
+    #[builder(default=HashMap::new(), setter(skip))]
     pub(crate) components_key_id: HashMap<String, u32>,
-    pub(crate) device_info: DeviceInfoResponse,
+    #[builder(default = {
+
+        // Channel for direct answers (prioritized when sending)
+        let (n_answer_messages_tx, n_answer_messages_rx) = broadcast::channel::<ProtoMessage>(16);
+        // Channel for normal messages (e.g. state updates)
+        let (n_messages_tx, n_messages_rx) = broadcast::channel::<ProtoMessage>(16);
+
+        answer_messages_rx = Some(n_answer_messages_rx);
+        answer_messages_tx = Some(n_answer_messages_tx);
+        messages_rx = Some(n_messages_rx);
+        messages_tx = Some(n_messages_tx);
+
+        // Channel for public interface
+        let (n_tx, n_rx): (
+            std::sync::mpsc::Sender<ProtoMessage>,
+            std::sync::mpsc::Receiver<ProtoMessage>,
+        ) = mpsc::channel();
+        tx = Some(n_tx);
+        rx = Some(n_rx);
+
+        0
+    }, setter(skip))]
+    pub(crate) current_key: u32,
+
+    // Required fields
+    name: String,
+
+    // Optional fields
+    #[builder(default= "0.0.0.0:6053".to_string())]
+    address: String,
+
+    #[builder(default = None, setter(strip_option))]
+    password: Option<String>,
+
+    #[builder(default = 1)]
+    api_version_major: u32,
+    #[builder(default = 10)]
+    api_version_minor: u32,
+    #[builder(default="Rust: esphome-native-api".to_string())]
+    server_info: String,
+
+    #[builder(default = None, setter(strip_option))]
+    friendly_name: Option<String>,
+
+    #[builder(default = None, setter(strip_option))]
+    mac: Option<String>,
+
+    #[builder(default = None, setter(strip_option))]
+    model: Option<String>,
+
+    #[builder(default = None, setter(strip_option))]
+    manufacturer: Option<String>,
+    #[builder(default = None, setter(strip_option))]
+    suggested_area: Option<String>,
+    #[builder(default = None, setter(strip_option))]
+    bluetooth_mac_address: Option<String>,
+
 }
 
 impl Server {
-    pub fn new(address: String) -> Self {
-        let (tx, rx): (std::sync::mpsc::Sender<ProtoMessage>, std::sync::mpsc::Receiver<ProtoMessage>) = mpsc::channel();
-
-        Server {
-            address,
-            device_info: DeviceInfoResponse {
-                uses_password: false,
-                name: "name".to_owned(),
-                mac_address: "mac".to_owned(),
-                esphome_version: "2025.4.0".to_owned(),
-                compilation_time: "".to_owned(),
-                model: "model".to_owned(),
-                has_deep_sleep: false,
-                project_name: "".to_owned(),
-                project_version: "".to_owned(),
-                webserver_port: 8080,
-                // See https://github.com/esphome/aioesphomeapi/blob/c1fee2f4eaff84d13ca71996bb272c28b82314fc/aioesphomeapi/model.py#L154
-                legacy_bluetooth_proxy_version: 1,
-                bluetooth_proxy_feature_flags: 1,
-                manufacturer: "Test".to_string(),
-                // format!(
-                //     "{} {} {}",
-                //     whoami::platform(),
-                //     whoami::distro(),
-                //     whoami::arch()
-                // ),
-                friendly_name: "friendly_name".to_string(),
-                legacy_voice_assistant_version: 0,
-                voice_assistant_feature_flags: 0,
-                suggested_area: "".to_owned(),
-                bluetooth_mac_address: "04:CF:4B:1F:F9:36".to_owned(),
-                // 04:CF:4B:1F:F9:36
-            },
-            components_by_key: HashMap::new(),
-            components_key_id: HashMap::new(),
-        }
-    }
-
-    pub async fn start(&self)  -> Result<(), Box<dyn std::error::Error>>{
+    pub async fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let addr: SocketAddr = self.address.parse().unwrap();
         let socket = TcpSocket::new_v4().unwrap();
         socket.set_reuseaddr(true).unwrap();
@@ -93,17 +121,123 @@ impl Server {
             debug!("Accepted request from {}", socket.peer_addr().unwrap());
             let (mut read, mut write) = tokio::io::split(socket);
 
-            // Channel for direct answers (prioritized when sending)
-            let (answer_messages_tx, answer_messages_rx) = broadcast::channel::<ProtoMessage>(16);
-            // Channel for normal messages (e.g. state updates)
-            let (messages_tx, messages_rx) = broadcast::channel::<ProtoMessage>(16);
+            let device_info_clone = DeviceInfoResponse {
+                uses_password: false,
+                name: self.name.clone(),
+                mac_address: self.mac.clone().unwrap_or_default(),
+                esphome_version: "2025.4.0".to_owned(),
+                compilation_time: "".to_owned(),
+                model: self.model.clone().unwrap_or_default(),
+                has_deep_sleep: false,
+                project_name: "".to_owned(),
+                project_version: "".to_owned(),
+                webserver_port: 8080,
+                // See https://github.com/esphome/aioesphomeapi/blob/c1fee2f4eaff84d13ca71996bb272c28b82314fc/aioesphomeapi/model.py#L154
+                legacy_bluetooth_proxy_version: 1,
+                bluetooth_proxy_feature_flags: 1,
+                manufacturer: self.manufacturer.clone().unwrap_or_default(),
+                friendly_name: self.friendly_name.clone().unwrap_or(self.name.clone()),
+                legacy_voice_assistant_version: 0,
+                voice_assistant_feature_flags: 0,
+                suggested_area: self.suggested_area.clone().unwrap_or_default(),
+                bluetooth_mac_address: self.bluetooth_mac_address.clone().unwrap_or_default(),
+            };
 
+            let hello_response = HelloResponse {
+                api_version_major: self.api_version_major,
+                api_version_minor: self.api_version_minor,
+                server_info: self.server_info.clone(),
+                name: self.name.clone(),
+            };
+            let password_clone = self.password.clone();
             let api_components_key_id_clone = self.components_key_id.clone();
-            let device_info_clone = self.device_info.clone();
             let api_components_clone = self.components_by_key.clone();
-            // Read Loop
-            let answer_messages_tx_clone = answer_messages_tx.clone();
 
+            let rx = self.rx.as_ref().unwrap();
+            // TODO: send messages
+            // tokio::spawn(async move {
+            //     loop {
+            //         let message = rx.recv().unwrap();
+            //     }
+            // });
+
+            // Write Loop
+            let mut answer_messages_rx_clone =
+                self.answer_messages_rx.as_ref().unwrap().resubscribe();
+            let mut messages_rx_clone = self.messages_rx.as_ref().unwrap().resubscribe();
+
+            tokio::spawn(async move {
+                let mut disconnect = false;
+                loop {
+                    let mut answer_buf: Vec<u8> = vec![];
+
+                    let answer_messages = answer_messages_rx_clone.recv();
+                    let normal_messages = messages_rx_clone.recv();
+                    let answer_message: ProtoMessage;
+                    // Wait for any new message
+                    tokio::select! {
+                        message = answer_messages => {
+                            answer_message = message.unwrap();
+                        }
+                        message = normal_messages => {
+                            answer_message = message.unwrap();
+                        }
+                    };
+
+                    debug!("Answer message: {:?}", answer_message);
+                    answer_buf =
+                        [answer_buf, to_packet_from_ref(&answer_message).unwrap()].concat();
+                    match answer_message {
+                        ProtoMessage::DisconnectResponse(_) => {
+                            disconnect = true;
+                        }
+                        _ => {}
+                    }
+
+                    loop {
+                        // let message = messages_rx_clone.recv().await.unwrap();
+                        let answer_message = answer_messages_rx_clone.try_recv();
+                        match answer_message {
+                            Ok(answer_message) => {
+                                debug!("Answer message: {:?}", answer_message);
+                                answer_buf =
+                                    [answer_buf, to_packet_from_ref(&answer_message).unwrap()]
+                                        .concat();
+
+                                match answer_message {
+                                    ProtoMessage::DisconnectResponse(_) => {
+                                        disconnect = true;
+                                    }
+                                    ProtoMessage::ConnectResponse(response) => {
+                                        // TODO: Use better way than just disconnecting... (session management)
+                                        if response.invalid_password {
+                                            disconnect = true;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+
+                    trace!("Send response: {:?}", answer_buf);
+                    write
+                        .write_all(&answer_buf)
+                        .await
+                        .expect("failed to write data to socket");
+
+                    if disconnect {
+                        // Close the socket
+                        debug!("Disconnecting");
+                        write.shutdown().await.expect("failed to shutdown socket");
+                        break;
+                    }
+                }
+            });
+
+            // Read Loop
+            let answer_messages_tx_clone = self.answer_messages_tx.as_ref().unwrap().clone();
             tokio::spawn(async move {
                 let mut buf = vec![0; 1024];
 
@@ -139,14 +273,9 @@ impl Server {
                         match message {
                             ProtoMessage::HelloRequest(hello_request) => {
                                 debug!("HelloRequest: {:?}", hello_request);
-                                let response_message = HelloResponse {
-                                    api_version_major: 1,
-                                    api_version_minor: 10,
-                                    server_info: "Rust: esphome-native-api".to_string(),
-                                    name: device_info_clone.name.clone(),
-                                };
+
                                 answer_messages_tx_clone
-                                    .send(ProtoMessage::HelloResponse(response_message))
+                                    .send(ProtoMessage::HelloResponse(hello_response.clone()))
                                     .unwrap();
                             }
                             ProtoMessage::DeviceInfoRequest(device_info_request) => {
@@ -159,8 +288,15 @@ impl Server {
                             }
                             ProtoMessage::ConnectRequest(connect_request) => {
                                 debug!("ConnectRequest: {:?}", connect_request);
+                                let mut invalid = true;
+                                if let Some(password) = password_clone.clone() {
+                                    invalid = constant_time_eq(connect_request.password.as_bytes(), password.as_bytes());
+                                } else {
+                                    invalid = false;
+                                }
+
                                 let response_message = ConnectResponse {
-                                    invalid_password: false,
+                                    invalid_password: invalid,
                                 };
                                 answer_messages_tx_clone
                                     .send(ProtoMessage::ConnectResponse(response_message))
@@ -277,82 +413,30 @@ impl Server {
                     }
                 }
             });
-
-            // Write Loop
-            let mut answer_messages_rx_clone = answer_messages_rx.resubscribe();
-            let mut messages_rx_clone = messages_rx.resubscribe();
-            tokio::spawn(async move {
-                let mut disconnect = false;
-                loop {
-                    let mut answer_buf: Vec<u8> = vec![];
-
-                    let answer_messages = answer_messages_rx_clone.recv();
-                    let normal_messages = messages_rx_clone.recv();
-                    let answer_message: ProtoMessage;
-                    // Wait for any new message
-                    tokio::select! {
-                        message = answer_messages => {
-                            answer_message = message.unwrap();
-                        }
-                        message = normal_messages => {
-                            answer_message = message.unwrap();
-                        }
-                    };
-
-                    debug!("Answer message: {:?}", answer_message);
-                    answer_buf =
-                        [answer_buf, to_packet_from_ref(&answer_message).unwrap()].concat();
-                    match answer_message {
-                        ProtoMessage::DisconnectResponse(_) => {
-                            disconnect = true;
-                        }
-                        _ => {}
-                    }
-
-                    loop {
-                        // let message = messages_rx_clone.recv().await.unwrap();
-                        let answer_message = answer_messages_rx_clone.try_recv();
-                        match answer_message {
-                            Ok(answer_message) => {
-                                debug!("Answer message: {:?}", answer_message);
-                                answer_buf =
-                                    [answer_buf, to_packet_from_ref(&answer_message).unwrap()]
-                                        .concat();
-
-                                match answer_message {
-                                    ProtoMessage::DisconnectResponse(_) => {
-                                        disconnect = true;
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            Err(_) => break,
-                        }
-                    }
-
-                    trace!("Send response: {:?}", answer_buf);
-                    write
-                        .write_all(&answer_buf)
-                        .await
-                        .expect("failed to write data to socket");
-
-                    if disconnect {
-                        // Close the socket
-                        debug!("Disconnecting");
-                        write.shutdown().await.expect("failed to shutdown socket");
-                        break;
-                    }
-                }
-            });
         }
     }
 
-    fn send(&self, message: &str) {
-        // Send message to server
+    pub fn add_entity(&mut self, entity_id: &str, entity: ProtoMessage) {
+        todo!("Not yet implemented");
+        // self.components_key_id
+        // .insert(entity_id.to_string(), self.current_key);
+        // self.components_by_key
+        //     .insert(self.current_key, entity);
+
+        // self.current_key += 1;
     }
 
-    fn receive(&self) -> String {
-        // Receive message from server
-        String::new()
+    pub fn subscibe(&mut self) -> &mut mpsc::Receiver<ProtoMessage> {
+        // Subscribe to messages
+        self.rx.as_mut().unwrap()
     }
+
+    pub fn send(&mut self, message: ProtoMessage) {
+        self.tx.as_mut().unwrap().send(message).unwrap();
+    }
+
+    // fn receive(&self) ->  {
+    //     // Receive message from server
+    //     String::new()
+    // }
 }

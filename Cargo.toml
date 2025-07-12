@@ -22,6 +22,8 @@ include = [
 log = "0.4"
 tokio = { version = "1", features = ["full"] }
 prost = "0.13.5"
+typed-builder = "0.21.0"
+constant_time_eq = "0.4.2"
 
 [workspace]
 resolver = "2"

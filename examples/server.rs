@@ -10,36 +10,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter_level(LevelFilter::Debug)
         .init();
 
-    let server = async {
-        let server = Server::new("0.0.0.0:6053".to_string());
-        server.start().await.unwrap();
-    };
+    let server = Server::builder().build();
 
-    let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-    };
+    server.start().await?;
 
-    #[cfg(unix)]
-    let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = server => {},
-        _ = ctrl_c => {},
-        _ = terminate => {},
-    }
-    info!("Stopped");
-
-    std::process::exit(0);
 
     Ok(())
 }
