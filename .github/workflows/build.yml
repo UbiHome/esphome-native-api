@@ -13,6 +13,35 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  generate_protobuf:
+    name: Get Protobuf files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Generate Protobuf files
+        run: | 
+          cd generator
+          cargo run
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Upload math result for job 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: protobuf_files
+          path: generator\protos
+      - name: Upload math result for job 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: proto_src_files
+          path: src/proto
+
   test:
     name: Test - ${{ matrix.platform.os-name }}
     strategy:
@@ -51,15 +80,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
+
+      - name: Download math result for job 2
+        uses: actions/download-artifact@v4
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Generate Protobuf files
-        run: | 
-          cd generator
-          cargo run
+          name: proto_src_files
+          path: src/proto
       - name: Build binary
         uses: houseabsolute/actions-rust-cross@v1
         with:

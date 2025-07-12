@@ -15,7 +15,7 @@ async fn main() {
     }
 
 
-    let mut page = octocrab
+    let page = octocrab
         .repos("esphome", "esphome")
         .releases()
         .list()
