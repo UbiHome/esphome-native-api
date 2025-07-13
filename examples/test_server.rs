@@ -1,9 +1,9 @@
-use std::{future, net::SocketAddr};
+use std::{future, net::SocketAddr, time::Duration};
 
-use esphome_native_api::{proto::version_2025_4_2::{ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse, ListEntitiesSwitchResponse, SensorStateResponse}};
+use esphome_native_api::{proto::version_2025_6_3::{ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse, ListEntitiesSwitchResponse, SensorStateResponse}};
 use log::{debug, info, LevelFilter};
-use tokio::{net::TcpSocket, signal};
-use esphome_native_api::proto::version_2025_4_2::ListEntitiesButtonResponse;
+use tokio::{net::TcpSocket, signal, time::sleep};
+use esphome_native_api::proto::version_2025_6_3::ListEntitiesButtonResponse;
 use esphome_native_api::ProtoMessage;
 use esphome_native_api::esphomeapi::EspHomeApi;
 
@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut server = EspHomeApi::builder()
                         .api_version_major(1)
                         .api_version_minor(42)
-                        .server_info("test_server".to_string())
+                        .server_info("test_server_info".to_string())
                         .name("test_device".to_string())
                         .friendly_name("friendly_test_device".to_string())
                         .bluetooth_mac_address("B0:00:00:00:00:00".to_string())
@@ -45,21 +45,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .build();
 
                 // All supported entities in alphabetical order
-                // let binary_sensor =
-                //     ProtoMessage::ListEntitiesBinarySensorResponse(
-                //         ListEntitiesBinarySensorResponse {
-                //             object_id: "test_binary_sensor_object_id".to_string(),
-                //             key: 3,
-                //             name: "test_binary_sensor".to_string(),
-                //             unique_id: "test_binary_sensor_unique_id".to_string(),
-                //             icon: "mdi:test-binary-sensor-icon".to_string(),
-                //             device_class: "test_binary_sensor_device_class".to_string(),
-                //             is_status_binary_sensor: true,
-                //             disabled_by_default: false,
-                //             entity_category: 0, // EntityCategory::None as i32
-                //         },
-                //     );
-                // server.add_entity("test_binary_sensor", binary_sensor.clone());
+                let binary_sensor =
+                    ProtoMessage::ListEntitiesBinarySensorResponse(
+                        ListEntitiesBinarySensorResponse {
+                            object_id: "test_binary_sensor_object_id".to_string(),
+                            key: 3,
+                            name: "test_binary_sensor".to_string(),
+                            unique_id: "test_binary_sensor_unique_id".to_string(),
+                            icon: "mdi:test-binary-sensor-icon".to_string(),
+                            device_class: "test_binary_sensor_device_class".to_string(),
+                            is_status_binary_sensor: true,
+                            disabled_by_default: false,
+                            entity_category: 0, // EntityCategory::None as i32
+                        },
+                    );
+                server.add_entity("test_binary_sensor", binary_sensor.clone());
 
                 let button = ProtoMessage::ListEntitiesButtonResponse(
                     ListEntitiesButtonResponse { 
@@ -130,10 +130,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 server.add_entity("test_switch", switch.clone());
 
-                let (tx, rx) = server.start(stream).await
+                let (tx) = server.start(stream).await
                     .expect("Failed to start server");
 
                 debug!("Server started");
+                sleep(Duration::from_secs(3)).await;
+
                 let message = ProtoMessage::SensorStateResponse(
                     SensorStateResponse {
                         key: 0,
@@ -141,7 +143,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         missing_state: false,
                     },
                 );
-                tx.send(message).expect("Failed to send message");
+                tx.send(message.clone()).expect("Failed to send message");
+
+                debug!("Queue message to sent");
+
                 // Wait indefinitely for the interrupts
                 let future = future::pending();
                 let () = future.await;

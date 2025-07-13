@@ -1,70 +1,31 @@
 use crate::parser;
 use crate::parser::ProtoMessage;
-use crate::proto::version_2025_4_2::ConnectResponse;
-use crate::proto::version_2025_4_2::DeviceInfoResponse;
-use crate::proto::version_2025_4_2::DisconnectResponse;
-use crate::proto::version_2025_4_2::HelloResponse;
-use crate::proto::version_2025_4_2::ListEntitiesDoneResponse;
-use crate::proto::version_2025_4_2::PingResponse;
-use crate::proto::version_2025_4_2::SubscribeHomeAssistantStateResponse;
-use crate::proto::version_2025_4_2::SubscribeLogsResponse;
+use crate::proto::version_2025_6_3::ConnectResponse;
+use crate::proto::version_2025_6_3::DeviceInfoResponse;
+use crate::proto::version_2025_6_3::DisconnectResponse;
+use crate::proto::version_2025_6_3::HelloResponse;
+use crate::proto::version_2025_6_3::ListEntitiesDoneResponse;
+use crate::proto::version_2025_6_3::PingResponse;
+use crate::proto::version_2025_6_3::SubscribeHomeAssistantStateResponse;
+use crate::proto::version_2025_6_3::SubscribeLogsResponse;
 use crate::to_packet_from_ref;
 use log::debug;
 use log::trace;
 use tokio::net::TcpStream;
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::str;
-use std::sync::mpsc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpSocket;
 use tokio::sync::broadcast;
-use tokio::sync::broadcast::Receiver;
-use tokio::sync::broadcast::Sender;
 use typed_builder::TypedBuilder;
 use constant_time_eq::constant_time_eq;
 
 #[derive(TypedBuilder)]
 pub struct EspHomeApi {
-    // Private fields
-    #[builder(default, mutable_during_default_resolution, setter(skip))]
-    answer_messages_tx: Option<Sender<ProtoMessage>>,
-    #[builder(default, mutable_during_default_resolution, setter(skip))]
-    answer_messages_rx: Option<Receiver<ProtoMessage>>,
-    #[builder(default, mutable_during_default_resolution, setter(skip))]
-    messages_tx: Option<Sender<ProtoMessage>>,
-    #[builder(default, mutable_during_default_resolution, setter(skip))]
-    messages_rx: Option<Receiver<ProtoMessage>>,
-
-    #[builder(default, mutable_during_default_resolution, setter(skip))]
-    tx: Option<mpsc::Sender<ProtoMessage>>,
-    #[builder(default, mutable_during_default_resolution, setter(skip))]
-    rx: Option<mpsc::Receiver<ProtoMessage>>,
-
     #[builder(default=HashMap::new(), setter(skip))]
     pub(crate) components_by_key: HashMap<u32, ProtoMessage>,
     #[builder(default=HashMap::new(), setter(skip))]
     pub(crate) components_key_id: HashMap<String, u32>,
     #[builder(default = {
-
-        // Channel for direct answers (prioritized when sending)
-        let (n_answer_messages_tx, n_answer_messages_rx) = broadcast::channel::<ProtoMessage>(16);
-        // Channel for normal messages (e.g. state updates)
-        let (n_messages_tx, n_messages_rx) = broadcast::channel::<ProtoMessage>(16);
-
-        answer_messages_rx = Some(n_answer_messages_rx);
-        answer_messages_tx = Some(n_answer_messages_tx);
-        messages_rx = Some(n_messages_rx);
-        messages_tx = Some(n_messages_tx);
-
-        // Channel for public interface
-        let (n_tx, n_rx): (
-            std::sync::mpsc::Sender<ProtoMessage>,
-            std::sync::mpsc::Receiver<ProtoMessage>,
-        ) = mpsc::channel();
-        tx = Some(n_tx);
-        rx = Some(n_rx);
-
         0
     }, setter(skip))]
     pub(crate) current_key: u32,
@@ -100,12 +61,18 @@ pub struct EspHomeApi {
 }
 
 impl EspHomeApi {
-    pub async fn start(&mut self, tcp_stream: TcpStream,) -> Result<(mpsc::Sender<ProtoMessage>, &mpsc::Receiver<ProtoMessage>), Box<dyn std::error::Error>> {
+    pub async fn start(&mut self, tcp_stream: TcpStream,) -> Result<(broadcast::Sender<ProtoMessage>), Box<dyn std::error::Error>> {
         
+        // Channel for direct answers (prioritized when sending)
+        let (answer_messages_tx, mut answer_messages_rx) = broadcast::channel::<ProtoMessage>(16);
+        // Channel for normal messages (e.g. state updates)
+        let (messages_tx, mut messages_rx) = broadcast::channel::<ProtoMessage>(16);
+
         // Asynchronously wait for an inbound socket.
         let (mut read, mut write) = tcp_stream.into_split();
 
-        let device_info_clone = DeviceInfoResponse {
+        let device_info = DeviceInfoResponse {
+            api_encryption_supported: false,
             uses_password: false,
             name: self.name.clone(),
             mac_address: self.mac.clone().unwrap_or_default(),
@@ -134,21 +101,8 @@ impl EspHomeApi {
             name: self.name.clone(),
         };
         let password_clone = self.password.clone();
-        let api_components_key_id_clone = self.components_key_id.clone();
         let api_components_clone = self.components_by_key.clone();
 
-        let rx = self.rx.as_ref().unwrap();
-        // TODO: send messages
-        // tokio::spawn(async move {
-        //     loop {
-        //         let message = rx.recv().unwrap();
-        //     }
-        // });
-
-        // Write Loop
-        // Clone all necessary data before spawning the task
-        let mut answer_messages_rx_clone = self.answer_messages_rx.as_ref().unwrap().resubscribe();
-        let mut messages_rx_clone = self.messages_rx.as_ref().unwrap().resubscribe();
 
         // Write Loop
         tokio::spawn(async move {
@@ -156,8 +110,8 @@ impl EspHomeApi {
             loop {
                 let mut answer_buf: Vec<u8> = vec![];
 
-                let answer_messages = answer_messages_rx_clone.recv();
-                let normal_messages = messages_rx_clone.recv();
+                let answer_messages = answer_messages_rx.recv();
+                let normal_messages = messages_rx.recv();
                 let answer_message: ProtoMessage;
                 // Wait for any new message
                 tokio::select! {
@@ -180,7 +134,7 @@ impl EspHomeApi {
                 }
 
                 loop {
-                    let answer_message = answer_messages_rx_clone.try_recv();
+                    let answer_message = answer_messages_rx.try_recv();
                     match answer_message {
                         Ok(answer_message) => {
                             debug!("Answer message: {:?}", answer_message);
@@ -193,7 +147,6 @@ impl EspHomeApi {
                                     disconnect = true;
                                 }
                                 ProtoMessage::ConnectResponse(response) => {
-                                    // TODO: Use better way than just disconnecting... (session management)
                                     if response.invalid_password {
                                         disconnect = true;
                                     }
@@ -210,6 +163,7 @@ impl EspHomeApi {
                     .write_all(&answer_buf)
                     .await
                     .expect("failed to write data to socket");
+                write.flush().await.expect("failed to flush data to socket");
 
                 if disconnect {
                     debug!("Disconnecting");
@@ -218,16 +172,12 @@ impl EspHomeApi {
                 }
             }
         });
-
-        // Read Loop
+        
         // Clone all necessary data before spawning the task
-        // let mut read = read;
-        let answer_messages_tx_clone = self.answer_messages_tx.as_ref().unwrap().clone();
-        let hello_response = hello_response.clone();
-        let device_info_clone = device_info_clone.clone();
-        let password_clone = password_clone.clone();
+        let answer_messages_tx_clone = answer_messages_tx.clone();
         let api_components_clone = api_components_clone.clone();
-
+        
+        // Read Loop
         tokio::spawn(async move {
             let mut buf = vec![0; 1024];
 
@@ -272,7 +222,7 @@ impl EspHomeApi {
                             debug!("DeviceInfoRequest: {:?}", device_info_request);
                             answer_messages_tx_clone
                                 .send(ProtoMessage::DeviceInfoResponse(
-                                    device_info_clone.clone(),
+                                    device_info.clone(),
                                 ))
                                 .unwrap();
                         }
@@ -323,7 +273,7 @@ impl EspHomeApi {
                             debug!("SubscribeLogsRequest: {:?}", request);
                             let response_message = SubscribeLogsResponse {
                                 level: 0,
-                                message: "Test log".to_string(),
+                                message: "Test log".to_string().as_bytes().to_vec(),
                                 send_failed: false,
                             };
                             answer_messages_tx_clone
@@ -403,7 +353,8 @@ impl EspHomeApi {
                 }
             }
         });
-        Ok((self.tx.as_ref().unwrap().clone(), self.rx.as_ref().unwrap().clone()))
+
+        Ok((messages_tx.clone()))
     }
 
     pub fn add_entity(&mut self, entity_id: &str, entity: ProtoMessage) {
@@ -412,16 +363,6 @@ impl EspHomeApi {
             .insert(self.current_key, entity);
 
         self.current_key += 1;
-    }
-
-    pub fn subscibe(&mut self) -> &mut mpsc::Receiver<ProtoMessage> {
-        // Subscribe to messages
-        self.rx.as_mut().unwrap()
-    }
-
-    pub fn send(&mut self, message: ProtoMessage) {
-        debug!("Send Message Function: {:?}", message);
-        self.answer_messages_tx.as_mut().unwrap().send(message).unwrap();
     }
 
     // fn receive(&self) ->  {

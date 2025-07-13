@@ -36,12 +36,22 @@ async def test_run(): #test_server: TestServer):
     entities, services = await api.list_entities_services()
     print("entities", entities, services)
 
-    assert len(entities) == 4, entities
-    # binary_sensor = entities[3]
+    assert len(entities) == 5, entities
+    binary_sensor = next((e for e in entities if isinstance(e, aioesphomeapi.BinarySensorInfo)))
     light = next((e for e in entities if isinstance(e, aioesphomeapi.LightInfo)))
     button = next((e for e in entities if isinstance(e, aioesphomeapi.ButtonInfo)))
     switch = next((e for e in entities if isinstance(e, aioesphomeapi.SwitchInfo)))
     sensor = next((e for e in entities if isinstance(e, aioesphomeapi.SensorInfo)))
+
+    assert isinstance(binary_sensor, aioesphomeapi.BinarySensorInfo)
+    assert binary_sensor.unique_id == "test_binary_sensor_unique_id"
+    assert binary_sensor.name == "test_binary_sensor"
+    assert binary_sensor.key == 3
+    assert binary_sensor.icon == "mdi:test-binary-sensor-icon"
+    assert binary_sensor.device_class == "test_binary_sensor_device_class"
+    assert binary_sensor.disabled_by_default is False
+    assert binary_sensor.entity_category == aioesphomeapi.EntityCategory.NONE
+    assert binary_sensor.object_id == "test_binary_sensor_object_id"
 
     assert isinstance(button, aioesphomeapi.ButtonInfo)
     assert button.unique_id == "test_button_unique_id"
@@ -84,17 +94,17 @@ async def test_run(): #test_server: TestServer):
     mock = Mock()
     # # Subscribe to the state changes
     api.subscribe_states(mock)
-    
-    # Test switching the switch on via command
-    # api.switch_command(0, True)
 
     # State update should be send back
     while not mock.called:
         await sleep(0.1)
     state = mock.call_args.args[0]
     assert isinstance(state, aioesphomeapi.SensorState)
-    assert state.state is True
+    assert state.state == 25.0
     mock.reset_mock()
+
+    # Test switching the switch on via command
+    # api.switch_command(0, True)
 
     # # Test switching the switch off via command
     # api.switch_command(0, False)

@@ -1,4 +1,4 @@
-use crate::proto::version_2025_4_2::{
+use crate::proto::version_2025_6_3::{
     AlarmControlPanelCommandRequest, AlarmControlPanelStateResponse, BinarySensorStateResponse,
     BluetoothConnectionsFreeResponse, BluetoothDeviceClearCacheResponse,
     BluetoothDeviceConnectionResponse, BluetoothDevicePairingResponse, BluetoothDeviceRequest,
