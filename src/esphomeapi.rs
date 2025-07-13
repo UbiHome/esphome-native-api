@@ -10,7 +10,8 @@ use crate::proto::version_2025_6_3::ListEntitiesDoneResponse;
 use crate::proto::version_2025_6_3::PingResponse;
 use crate::proto::version_2025_6_3::SubscribeHomeAssistantStateResponse;
 use crate::proto::version_2025_6_3::SubscribeLogsResponse;
-use crate::to_packet_from_ref;
+use crate::to_encrypted_frame;
+use crate::to_unencrypted_frame;
 use log::debug;
 use log::info;
 use log::trace;
@@ -300,28 +301,19 @@ impl EspHomeApi {
                             let hello_message = ProtoMessage::HelloResponse(
                                 proto::version_2025_6_3::HelloResponse {
                                 api_version_major: 1,
-                                api_version_minor: 1,
+                                api_version_minor: 42,
                                 server_info: "Test Server".to_string(),
                                 name: "Test Server".to_string(),
                             });
-                            let bytes = to_packet_from_ref(&hello_message).unwrap();
                             let (
                                 mut cipher_decrypt,  
                                 mut cipher_encrypt) = handshake_state.get_ciphers();
-
-                            let encrypted_message_hello = cipher_encrypt.encrypt_vec(&bytes);
-
-
-                            let len_u16 = encrypted_message_hello.len() as u16;
-                            let len_bytes = len_u16.to_be_bytes();
-                            let length: Vec<u8> = vec![len_bytes[0], len_bytes[1]];
-                            
-                            let mut encrypted_frame = vec![1];
-                            encrypted_frame.extend(length);
-                            encrypted_frame.extend(encrypted_message_hello);
+                                
+                                // let encrypted_message_hello = cipher_encrypt.encrypt_vec(&bytes);
+                            let bytes = to_encrypted_frame(&hello_message, &mut cipher_encrypt).unwrap();
 
                             write
-                                .write_all(&encrypted_frame)
+                                .write_all(&bytes)
                                 .await
                                 .expect("failed to write encrypted response");
                             // debug!("Encrypted message: {:?}", out);

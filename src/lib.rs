@@ -3,10 +3,12 @@ pub mod proto;
 pub mod esphomeapi;
 pub mod frame;
 
+use noise_protocol::CipherState;
+use noise_rust_crypto::ChaCha20Poly1305;
 pub use parser::ProtoMessage;
 use prost::encode_length_delimiter;
 
-pub fn to_packet_from_ref(obj: &ProtoMessage) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+pub fn to_unencrypted_frame(obj: &ProtoMessage) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let response_content = parser::proto_to_vec(&obj)?;
     let message_type = parser::message_to_num(&obj)?;
     let zero: Vec<u8> = vec![0];
@@ -15,6 +17,24 @@ pub fn to_packet_from_ref(obj: &ProtoMessage) -> Result<Vec<u8>, Box<dyn std::er
     let message_bit: Vec<u8> = vec![message_type];
 
     let answer_buf: Vec<u8> = [zero, length, message_bit, response_content].concat();
+    Ok(answer_buf)
+}
+
+pub fn to_encrypted_frame(obj: &ProtoMessage, cipher_encrypt: &mut CipherState<ChaCha20Poly1305>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let response_content = parser::proto_to_vec(&obj).unwrap().to_vec();
+
+    let message_type = (parser::message_to_num(&obj).unwrap() as u16).to_be_bytes().to_vec();
+    let message_length = (response_content.len() as u16).to_be_bytes().to_vec();
+
+    let unencrypted_message_frame: Vec<u8> = [message_type, message_length, response_content].concat();
+    let encrypted_message_frame = cipher_encrypt.encrypt_vec(&unencrypted_message_frame);
+
+
+    let message_length: Vec<u8> = (encrypted_message_frame.len() as u16).to_be_bytes().to_vec();
+    
+    let encrypted_identifier = vec![1];
+    
+    let answer_buf: Vec<u8> = [encrypted_identifier, message_length, encrypted_message_frame].concat();
     Ok(answer_buf)
 }
 
@@ -33,7 +53,7 @@ mod tests {
             server_info: "Test Server".to_string(),
             name: "Test Server".to_string(),
         });
-        let bytes = to_packet_from_ref(&hello_message).unwrap();
+        let bytes = to_unencrypted_frame(&hello_message).unwrap();
         let expected_bytes: Vec<u8> = vec![
             0, // Zero byte
             30, // Length of the message
@@ -64,7 +84,7 @@ mod tests {
             server_info: "Test Server".to_string(),
             name: "Test Server with a very very very very very very very very very very very very very very very very lon String".to_string(),
         });
-        let bytes = to_packet_from_ref(&hello_message).unwrap();
+        let bytes = to_unencrypted_frame(&hello_message).unwrap();
         let expected_bytes: Vec<u8> = vec![
             0, // Zero byte
             128, // Length of the message
@@ -93,7 +113,7 @@ mod tests {
             server_info: "Test Server".to_string(),
             name: "Test Server with a very very very very very very very very very very very very very very very very very very v very long String".to_string(),
         });
-        let bytes = to_packet_from_ref(&hello_message).unwrap();
+        let bytes = to_unencrypted_frame(&hello_message).unwrap();
         let expected_bytes: Vec<u8> = vec![
             0, // Zero byte
             146, // Length of the message
@@ -122,7 +142,7 @@ mod tests {
             server_info: "Test Server".to_string(),
             name: "Test Server with a very very very very very very very very very very very very very very very very very very very very long String".to_string(),
         });
-        let bytes = to_packet_from_ref(&hello_message).unwrap();
+        let bytes = to_unencrypted_frame(&hello_message).unwrap();
         let expected_bytes: Vec<u8> = vec![
             0, // Zero byte
             150, // Length of the message

@@ -58,7 +58,7 @@ mod tests {
     use noise_protocol::{patterns::{HandshakePattern, Token}, HandshakeState};
     use test_log::test;
 
-    use crate::{proto, to_packet_from_ref};
+    use crate::{proto, to_unencrypted_frame};
 
     use super::*;
 
@@ -124,7 +124,7 @@ mod tests {
             server_info: "Test Server".to_string(),
             name: "Test Server".to_string(),
         });
-        let bytes = to_packet_from_ref(&hello_message).unwrap();
+        let bytes = to_unencrypted_frame(&hello_message).unwrap();
 
         let mut out: Vec<u8> = vec![0; 48];
         handshake_state.write_message(b"", &mut out).unwrap();
