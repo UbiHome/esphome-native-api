@@ -86,6 +86,21 @@ mod tests {
         // let key = GenericArray::clone_from_slice(&noise_psk);
 
         // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
+        let mut handshake_state_client: HandshakeState<X25519, ChaCha20Poly1305, Sha256> = HandshakeState::new(
+            noise_nn_psk0(),
+            true,
+            b"NoiseAPIInit\x00\x00",
+            None, // No static private key
+            None,
+            None,
+            None
+        );
+
+        let mut client_message: Vec<u8> = vec![0; 48];
+        handshake_state_client.push_psk(&noise_psk);
+        handshake_state_client.write_message(b"", &mut client_message).unwrap();
+
+        // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
         let mut handshake_state: HandshakeState<X25519, ChaCha20Poly1305, Sha256> = HandshakeState::new(
             noise_nn_psk0(),
             false,
@@ -98,7 +113,7 @@ mod tests {
 
         let mut out: Vec<u8> = vec![0; 0];
         handshake_state.push_psk(&noise_psk);
-        handshake_state.read_message(&encrypted_frame[3+ 3+ 1..], &mut out).unwrap();
+        handshake_state.read_message(&client_message, &mut out).unwrap();
 
         debug!("Decrypted message: {:?}", out);
 
@@ -111,11 +126,16 @@ mod tests {
         });
         let bytes = to_packet_from_ref(&hello_message).unwrap();
 
-        let mut out: Vec<u8> = vec![0; 81];
-        handshake_state.write_message(&bytes, &mut out).unwrap();
+        let mut out: Vec<u8> = vec![0; 48];
+        handshake_state.write_message(b"", &mut out).unwrap();
+        assert_eq!(handshake_state.completed(), true);
         
         debug!("Encrypted message: {:?}", out);
 
+        let mut client_new_message: Vec<u8> = vec![0; 0];
+        handshake_state_client.read_message(&out, &mut client_new_message).unwrap();
+        assert_eq!(handshake_state_client.completed(), true);
+        assert_eq!(handshake_state.completed(), true);
         // let message = encrypted_frame_to_message(&encrypted_frame[1..], &noise_psk).unwrap();
         // match message {
         //     ProtoMessage::HelloRequest(msg) => {

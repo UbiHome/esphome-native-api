@@ -234,7 +234,7 @@ impl EspHomeApi {
                             let mut handshake_state: HandshakeState<X25519, ChaCha20Poly1305, Sha256> = HandshakeState::new(
                                 noise_nn_psk0(),
                                 false,
-                                b"NoiseAPIInit\x00\x00",
+                                b"NoiseAPIInit\0\0",
                                 None, // No static private key
                                 None,
                                 None,
@@ -277,10 +277,11 @@ impl EspHomeApi {
 
                             write.flush().await.expect("failed to flush encrypted response");
 
-                            let empty: Vec<u8> = vec![];
                             let mut out: Vec<u8> = vec![0; 48];
 
-                            handshake_state.write_message(&empty, &mut out).unwrap();
+                            handshake_state.write_message(b"", &mut out).unwrap();
+                            trace!("Encrypted Message: {:02X?}", &out);
+
                             let mut message = vec![0]; 
                             message.extend(out);
                             // message.extend(node_mac_address);
