@@ -3,6 +3,12 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 use std::env;
+const current_version: &str = "2025.4.1";
+const last_supplied_version: &str = "2025.2.1";
+
+fn get_package_name(version: &str) -> String {
+    format!("version_{}", version.clone()).replace(".", "_")
+}
 
 #[tokio::main]
 async fn main() {
@@ -15,7 +21,7 @@ async fn main() {
     }
 
 
-    let mut page = octocrab
+    let page = octocrab
         .repos("esphome", "esphome")
         .releases()
         .list()
@@ -32,6 +38,10 @@ async fn main() {
         if release.tag_name.contains("b"){
             println!("Skipping {}", &release.tag_name);
             continue;
+        }
+        // Only till this release:
+        if &release.tag_name == last_supplied_version {
+            break;
         }
 
 
@@ -76,22 +86,22 @@ async fn main() {
             println!("No content found in the API response.");
         }
 
-        let package_name = format!("version_{}", release.tag_name.clone()).replace(".", "_");
+        let package_name = get_package_name(&release.tag_name);
+        
         versions.push(package_name.clone());
         mod_file_content.push_str(&format!("#[cfg(feature = \"{}\")]\npub mod {};\n", package_name, package_name));
         let write_dir = format!("{}/{}", root_output_dir, package_name);
         let write_protos_dir = Path::new(write_dir.as_str());
         fs::create_dir_all(write_protos_dir).unwrap();
-
+        
         let mut config = prost_build::Config::new();
         // config.skip_debug(&["."]);
-        config.default_package_filename(package_name);
+        config.default_package_filename(&package_name);
         config.out_dir(write_protos_dir);
         config.include_file("mod.rs");
         config.compile_protos(&[format!("{}/api.proto", dir)], &[dir]).unwrap();
-        break;
     }
-
+    
     let mod_file = Path::new(root_output_dir).join("mod.rs");
     fs::write(mod_file, mod_file_content).unwrap();
 
@@ -102,7 +112,8 @@ async fn main() {
     .unwrap();
 
     file.write(b"\n[features]\n").unwrap();
-    file.write(format!("default = [\"{}\"]\n", versions.first().unwrap()).as_bytes()).unwrap();
+    let default_feature_flag = get_package_name(current_version);
+    file.write(format!("default = [\"{}\"]\n", default_feature_flag).as_bytes()).unwrap();
     
 
     for version in versions {
