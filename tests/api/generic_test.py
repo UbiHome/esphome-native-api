@@ -92,6 +92,7 @@ async def test_run(): #test_server: TestServer):
     while not mock.called:
         await sleep(0.1)
     state = mock.call_args.args[0]
+    assert isinstance(state, aioesphomeapi.SensorState)
     assert state.state is True
     mock.reset_mock()
 
