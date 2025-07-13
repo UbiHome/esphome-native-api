@@ -126,6 +126,7 @@ mod tests {
         let expected_bytes: Vec<u8> = vec![
             0, // Zero byte
             150, // Length of the message
+            1, // Length of the message
             2, // Message type for HelloResponse
             8, // Field descriptor: api_version_major
             1, // API version major
