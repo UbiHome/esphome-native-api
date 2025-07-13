@@ -225,10 +225,8 @@ impl EspHomeApi {
                             debug!("Encrypted message received, but not supported yet");
 
                             let noise_psk: Vec<u8> = BASE64_STANDARD.decode(b"px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA=").unwrap();
-                            let encrypted_frame: Vec<u8> = vec![1, 0, 0, 1, 0, 49, 0, 199, 24, 95, 23, 27, 153, 215, 105, 84, 40, 64, 10, 217, 219, 186, 107, 64, 228, 100, 222, 74, 240, 121, 115, 166, 140, 58, 228, 237, 81, 66, 112, 157, 138, 162, 119, 146, 224, 35, 51, 229, 19, 11, 193, 62, 181, 72, 34];
                             
-                            info!("Encrypted frame: {:?}", encrypted_frame);
-                            // let key = GenericArray::clone_from_slice(&noise_psk);
+                            info!("Encrypted frame: {:?}", &buf[0..n]);
 
                             // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
                             let mut handshake_state: HandshakeState<X25519, ChaCha20Poly1305, Sha256> = HandshakeState::new(
@@ -241,31 +239,30 @@ impl EspHomeApi {
                                 None
                             );
 
-                            let mut out: Vec<u8> = vec![0; 0];
                             handshake_state.push_psk(&noise_psk);
-                            handshake_state.read_message(&encrypted_frame[3+ 3+ 1..], &mut out).unwrap();
+                            let handshake_message = handshake_state.read_message_vec(&buf[3+ 3+ 1..n]);
 
-                            debug!("Decrypted message: {:?}", out);
+                            debug!("Decrypted message: {:?}", handshake_message);
 
-                            let mut message: Vec<u8> = Vec::new();
+                            let mut message_server_hello: Vec<u8> = Vec::new();
 
                             let encryption_protocol: Vec<u8> = vec![1];
                             let node_name = b"test_node";
                             let node_mac_address = b"00:00:00:00:00:01";
-                            message.extend(encryption_protocol);
-                            message.extend(node_name);
-                            message.extend(b"\0");
-                            message.extend(node_mac_address);
-                            message.extend(b"\0");
+                            message_server_hello.extend(encryption_protocol);
+                            message_server_hello.extend(node_name);
+                            message_server_hello.extend(b"\0");
+                            message_server_hello.extend(node_mac_address);
+                            message_server_hello.extend(b"\0");
                             
                                                         
-                            let len_u16 = message.len() as u16;
+                            let len_u16 = message_server_hello.len() as u16;
                             let len_bytes = len_u16.to_be_bytes();
                             let length: Vec<u8> = vec![len_bytes[0], len_bytes[1]];
                             
                             let mut encrypted = vec![1];
                             encrypted.extend(length);
-                            encrypted.extend(message);
+                            encrypted.extend(message_server_hello);
 
                             debug!("Answer: {:?}", &encrypted);
 
@@ -277,29 +274,56 @@ impl EspHomeApi {
 
                             write.flush().await.expect("failed to flush encrypted response");
 
-                            let mut out: Vec<u8> = vec![0; 48];
 
-                            handshake_state.write_message(b"", &mut out).unwrap();
+                            let out = handshake_state.write_message_vec(b"").unwrap();
                             trace!("Encrypted Message: {:02X?}", &out);
 
-                            let mut message = vec![0]; 
-                            message.extend(out);
-                            // message.extend(node_mac_address);
+                            let mut message_handshake = vec![0]; 
+                            message_handshake.extend(out);
 
-
-                            let len_u16 = message.len() as u16;
+                            let len_u16 = message_handshake.len() as u16;
                             let len_bytes = len_u16.to_be_bytes();
                             let length: Vec<u8> = vec![len_bytes[0], len_bytes[1]];
                             
                             let mut encrypted_frame = vec![1];
                             encrypted_frame.extend(length);
-                            encrypted_frame.extend(message);
+                            encrypted_frame.extend(message_handshake);
 
                             write
                                 .write_all(&encrypted_frame)
                                 .await
                                 .expect("failed to write encrypted response");
 
+
+                                
+                            // Use normal messaging
+                            let hello_message = ProtoMessage::HelloResponse(
+                                proto::version_2025_6_3::HelloResponse {
+                                api_version_major: 1,
+                                api_version_minor: 1,
+                                server_info: "Test Server".to_string(),
+                                name: "Test Server".to_string(),
+                            });
+                            let bytes = to_packet_from_ref(&hello_message).unwrap();
+                            let (
+                                mut cipher_decrypt,  
+                                mut cipher_encrypt) = handshake_state.get_ciphers();
+
+                            let encrypted_message_hello = cipher_encrypt.encrypt_vec(&bytes);
+
+
+                            let len_u16 = encrypted_message_hello.len() as u16;
+                            let len_bytes = len_u16.to_be_bytes();
+                            let length: Vec<u8> = vec![len_bytes[0], len_bytes[1]];
+                            
+                            let mut encrypted_frame = vec![1];
+                            encrypted_frame.extend(length);
+                            encrypted_frame.extend(encrypted_message_hello);
+
+                            write
+                                .write_all(&encrypted_frame)
+                                .await
+                                .expect("failed to write encrypted response");
                             // debug!("Encrypted message: {:?}", out);
                             // Encrypted
                             return;
