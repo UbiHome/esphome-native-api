@@ -10,7 +10,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter_level(LevelFilter::Debug)
         .init();
 
-    let server = Server::builder().build();
+    let mut server = Server::builder()
+        .address("0.0.0.0:7000".to_string())
+        .name("test_device".to_string())
+        .build();
 
     server.start().await?;
 

@@ -10,7 +10,7 @@ import pytest
 
 class TestServer:
     """A context manager to run a test server in the background."""
-                    
+
     process: Optional[Process] = None
     _stdout_task = None
     _stderr_task = None
@@ -49,35 +49,34 @@ class TestServer:
         print("killing process...")
 
         if self.process:
-            pass
+
+            # Try to terminate gracefully
+            self.process.terminate()
+            try:
+                print("waiting...")
+                await asyncio.wait_for(self.process.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                print("Force killing process...")
+                self.process.kill()
+                await self.process.wait()
+
+            print("remove readers...")
+            # Cancel the stdout/stderr reading tasks
+            if self._stdout_task:
+                self._stdout_task.cancel()
+                try:
+                    await self._stdout_task
+                except asyncio.CancelledError:
+                    pass
+
+            if self._stderr_task:
+                self._stderr_task.cancel()
+                try:
+                    await self._stderr_task
+                except asyncio.CancelledError:
+                    pass
             # Works on windows?!
-            os.kill(self.process.pid, signal.CTRL_BREAK_EVENT)
-
-            # # # Try to terminate gracefully
-            # # self.process.terminate()
-            # # try:
-            # #     print("waiting...")
-            # #     await asyncio.wait_for(self.process.wait(), timeout=5)
-            # # except asyncio.TimeoutError:
-            # #     print("Force killing process...")
-            # #     self.process.kill()
-            # #     await self.process.wait()
-
-            # print("remove readers...")
-            # # Cancel the stdout/stderr reading tasks
-            # if self._stdout_task:
-            #     self._stdout_task.cancel()
-            #     try:
-            #         await self._stdout_task
-            #     except asyncio.CancelledError:
-            #         pass
-
-            # if self._stderr_task:
-            #     self._stderr_task.cancel()
-            #     try:
-            #         await self._stderr_task
-            #     except asyncio.CancelledError:
-            #         pass
+            # os.kill(self.process.pid, signal.CTRL_BREAK_EVENT)
 
             # self.process = None
 

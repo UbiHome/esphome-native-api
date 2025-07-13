@@ -3,15 +3,17 @@ from asyncio import sleep
 import os
 from pprint import pp
 from unittest import IsolatedAsyncioTestCase
+from unittest.mock import Mock
 import aioesphomeapi
 
 from tests.conftest import TestServer
 
 
-async def test_run(test_server: TestServer):
+async def test_run(): #test_server: TestServer):
     """test simple server"""
 
-    api = aioesphomeapi.APIClient("127.0.0.1", test_server.port, "")
+    api = aioesphomeapi.APIClient("127.0.0.1", 7000, "")
+    # api = aioesphomeapi.APIClient("127.0.0.1", test_server.port, "")
     await api.connect(login=False)
 
     # Test API Hello
@@ -29,55 +31,88 @@ async def test_run(test_server: TestServer):
     assert device_info.model == "Test Model"
     assert device_info.suggested_area == "Test Area"
 
-    # List all entities of the device
-    entities = await api.list_entities_services()
-    pp(entities)
 
-        # await api.disconnect()
+    # List all entities of the device (order should be alphabetical)
+    entities, services = await api.list_entities_services()
+    print("entities", entities, services)
 
-        # entities, services = await api.list_entities_services()
-        # print("switches", entities, services)
-        # assert len(entities) == 1, entities
-        # entity = entities[0]
+    assert len(entities) == 4, entities
+    # binary_sensor = entities[3]
+    light = next((e for e in entities if isinstance(e, aioesphomeapi.LightInfo)))
+    button = next((e for e in entities if isinstance(e, aioesphomeapi.ButtonInfo)))
+    switch = next((e for e in entities if isinstance(e, aioesphomeapi.SwitchInfo)))
+    sensor = next((e for e in entities if isinstance(e, aioesphomeapi.SensorInfo)))
 
-        # assert type(entity) == aioesphomeapi.SwitchInfo
-        # assert entity.unique_id == button_id
-        # assert entity.name == button_name
+    assert isinstance(button, aioesphomeapi.ButtonInfo)
+    assert button.unique_id == "test_button_unique_id"
+    assert button.name == "test_button"
+    assert button.key == 0
+    assert button.icon == "mdi:test-button-icon"
+    assert button.device_class == "test_button_device_class"
+    assert button.disabled_by_default is False
+    assert button.entity_category == aioesphomeapi.EntityCategory.NONE
+    assert button.object_id == "test_button_object_id"
 
-        # mock = Mock()
-        # # Subscribe to the state changes
-        # api.subscribe_states(mock)
-        
-        # # Test switching the switch on via command
-        # api.switch_command(0, True)
-        # assert wait_and_get_file(switch_mock) == "true\n"
+    assert isinstance(switch, aioesphomeapi.SwitchInfo)
+    assert switch.unique_id == "test_switch_unique_id"
+    assert switch.name == "test_switch"
+    assert switch.key == 1
+    assert switch.icon == "mdi:test-switch-icon"
+    assert switch.device_class == "test_switch_device_class"
+    assert switch.disabled_by_default is False
+    assert switch.entity_category == aioesphomeapi.EntityCategory.NONE
+    assert switch.object_id == "test_switch_object_id"
 
-        # # State update should be send back
-        # while not mock.called:
-        #   await sleep(0.1)
-        # state = mock.call_args.args[0]
-        # assert state.state == True
-        # os.remove(switch_mock)
-        # mock.reset_mock()
+    assert isinstance(light, aioesphomeapi.LightInfo)
+    assert light.unique_id == "test_light_unique_id"
+    assert light.name == "test_light"
+    assert light.key == 4
+    assert light.icon == "mdi:test-light-icon"
+    assert light.disabled_by_default is False
+    assert light.entity_category == aioesphomeapi.EntityCategory.NONE
+    assert light.object_id == "test_light_object_id"
 
-        # # Test switching the switch off via command
-        # api.switch_command(0, False)
-        # assert wait_and_get_file(switch_mock) == "false\n"
-        # # State update should be send back
-        # while not mock.called:
-        #   await sleep(0.1)
-        # state = mock.call_args.args[0]
-        # assert state.state == False
-        # mock.reset_mock()
-        # os.remove(switch_mock)
+    assert isinstance(sensor, aioesphomeapi.SensorInfo)
+    assert sensor.unique_id == "test_sensor_unique_id"
+    assert sensor.name == "test_sensor"
+    assert sensor.key == 2
+    assert sensor.icon == "mdi:test-sensor-icon"
+    assert sensor.disabled_by_default is False
+    assert sensor.entity_category == aioesphomeapi.EntityCategory.NONE
+    assert sensor.object_id == "test_sensor_object_id"
 
-        # # Test switching the switch on via local change
-        # with open(switch_mock, "w") as f:
-        #   f.write("true")
+    mock = Mock()
+    # # Subscribe to the state changes
+    api.subscribe_states(mock)
+    
+    # Test switching the switch on via command
+    # api.switch_command(0, True)
 
-        # # Wait for the state change
-        # while not mock.called:
-        #   await sleep(0.1)
-        # state = mock.call_args.args[0]
-        # assert state.state == True
+    # State update should be send back
+    while not mock.called:
+        await sleep(0.1)
+    state = mock.call_args.args[0]
+    assert state.state is True
+    mock.reset_mock()
+
+    # # Test switching the switch off via command
+    # api.switch_command(0, False)
+    # assert wait_and_get_file(switch_mock) == "false\n"
+    # # State update should be send back
+    # while not mock.called:
+    #   await sleep(0.1)
+    # state = mock.call_args.args[0]
+    # assert state.state == False
+    # mock.reset_mock()
+    # os.remove(switch_mock)
+
+    # # Test switching the switch on via local change
+    # with open(switch_mock, "w") as f:
+    #   f.write("true")
+
+    # # Wait for the state change
+    # while not mock.called:
+    #   await sleep(0.1)
+    # state = mock.call_args.args[0]
+    # assert state.state == True
 
