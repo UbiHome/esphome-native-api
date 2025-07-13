@@ -5,4 +5,9 @@
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
     "python.defaultInterpreterPath": "${workspaceFolder}/tests/.venv/Scripts/python.exe",
+    "debugpy.debugJustMyCode": false,
+    "rust-analyzer.runnables.extraEnv": {
+        "RUST_BACKTRACE": "1",
+        "RUST_LOG": "debug"
+    }
 }

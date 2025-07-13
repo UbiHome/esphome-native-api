@@ -16,7 +16,7 @@ title: "Native API Packet"
 ---
 packet-beta
   0-0: "Marker"
-  1-1: "Length"
+  1-1: "Length (can also be up to 4 bytes long)"
   2-2: "Type"
   3-31: "Protobuf Content"
 ```
