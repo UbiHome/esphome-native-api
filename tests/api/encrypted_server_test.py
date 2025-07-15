@@ -7,7 +7,7 @@ import aioesphomeapi
 async def test_encrypted_server():  # test_server: TestServer):
     """test encrypted server"""
 
-    api = aioesphomeapi.APIClient("127.0.0.1", 7000, None, noise_psk="px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA=")
+    api = aioesphomeapi.APIClient("127.0.0.1", 7001, None, noise_psk="px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA=")
     # api = aioesphomeapi.APIClient("127.0.0.1", test_server.port, "")
     await api.connect(login=False)
 

@@ -1,41 +1,46 @@
 pub mod parser;
 pub mod proto;
 pub mod esphomeapi;
-pub mod frame;
+mod frame;
+mod packet_plaintext;
+mod packet_encrypted;
 
 use noise_protocol::CipherState;
 use noise_rust_crypto::ChaCha20Poly1305;
 pub use parser::ProtoMessage;
-use prost::encode_length_delimiter;
+
+use crate::{frame::construct_frame, packet_plaintext::message_to_packet};
 
 pub fn to_unencrypted_frame(obj: &ProtoMessage) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let response_content = parser::proto_to_vec(&obj)?;
-    let message_type = parser::message_to_num(&obj)?;
-    let zero: Vec<u8> = vec![0];
-    let mut length: Vec<u8> = Vec::new();
-    encode_length_delimiter(response_content.len(), &mut length).unwrap();
-    let message_bit: Vec<u8> = vec![message_type];
+    let packet = message_to_packet(obj)?;
 
-    let answer_buf: Vec<u8> = [zero, length, message_bit, response_content].concat();
-    Ok(answer_buf)
+    Ok(construct_frame(&packet, false)?)
 }
 
 pub fn to_encrypted_frame(obj: &ProtoMessage, cipher_encrypt: &mut CipherState<ChaCha20Poly1305>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let response_content = parser::proto_to_vec(&obj).unwrap().to_vec();
+    let packet = packet_encrypted::message_to_packet(obj, cipher_encrypt)?;
+    Ok(construct_frame(&packet, true)?)
 
-    let message_type = (parser::message_to_num(&obj).unwrap() as u16).to_be_bytes().to_vec();
-    let message_length = (response_content.len() as u16).to_be_bytes().to_vec();
-
-    let unencrypted_message_frame: Vec<u8> = [message_type, message_length, response_content].concat();
-    let encrypted_message_frame = cipher_encrypt.encrypt_vec(&unencrypted_message_frame);
-
-
-    let message_length: Vec<u8> = (encrypted_message_frame.len() as u16).to_be_bytes().to_vec();
     
-    let encrypted_identifier = vec![1];
     
-    let answer_buf: Vec<u8> = [encrypted_identifier, message_length, encrypted_message_frame].concat();
-    Ok(answer_buf)
+    
+    
+    
+    // let response_content = parser::proto_to_vec(&obj).unwrap().to_vec();
+
+    // let message_type = (parser::message_to_num(&obj).unwrap() as u16).to_be_bytes().to_vec();
+    // let message_length = (response_content.len() as u16).to_be_bytes().to_vec();
+
+    // let unencrypted_message_frame: Vec<u8> = [message_type, message_length, response_content].concat();
+    // let encrypted_message_frame = cipher_encrypt.encrypt_vec(&unencrypted_message_frame);
+
+
+    // let message_length: Vec<u8> = (encrypted_message_frame.len() as u16).to_be_bytes().to_vec();
+    
+    // let encrypted_identifier = vec![1];
+    
+    // let answer_buf: Vec<u8> = [encrypted_identifier, message_length, encrypted_message_frame].concat();
+    // Ok(answer_buf)
 }
 
 
@@ -68,6 +73,28 @@ mod tests {
             34, // Field descriptor: name
             11, // Field length
             b'T', b'e', b's', b't', b' ', b'S', b'e', b'r', b'v', b'e', b'r',
+        ];
+        assert_eq!(bytes, expected_bytes);
+    }
+
+  #[test]
+    fn hello_message_short_encrypted() {
+        let hello_message = ProtoMessage::HelloResponse(
+            proto::version_2025_6_3::HelloResponse {
+            api_version_major: 1,
+            api_version_minor: 1,
+            server_info: "Test Server".to_string(),
+            name: "Test Server".to_string(),
+        });
+        let key: [u8; 32] = [0; 32];
+        let mut cipher = CipherState::<ChaCha20Poly1305>::new(&key, 1);
+        let bytes = to_encrypted_frame(&hello_message, &mut cipher).unwrap();
+        let expected_bytes: Vec<u8> = vec![
+            1, // Preamble: encrypted
+            0, // Length
+            50, // Length
+            // Encrypted message content
+            83, 7, 229, 250, 66, 254, 9, 179, 47, 152, 53, 33, 20, 42, 219, 183, 37, 236, 193, 141, 151, 211, 72, 91, 58, 43, 66, 142, 231, 254, 199, 68, 238, 115, 218, 97, 216, 136, 154, 178, 100, 72, 12, 2, 175, 160, 139, 112, 115, 123
         ];
         assert_eq!(bytes, expected_bytes);
     }
