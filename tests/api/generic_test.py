@@ -31,7 +31,6 @@ async def test_run(): #test_server: TestServer):
     assert device_info.model == "Test Model"
     assert device_info.suggested_area == "Test Area"
 
-
     # List all entities of the device (order should be alphabetical)
     entities, services = await api.list_entities_services()
     print("entities", entities, services)

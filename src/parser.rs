@@ -51,7 +51,7 @@ macro_rules! proto_message_mappings {
         }
 
         // Generate the parse_proto_message function
-        pub fn parse_proto_message(message_type: u8, buf: &[u8]) -> Result<ProtoMessage, &'static str> {
+        pub fn parse_proto_message(message_type: usize, buf: &[u8]) -> Result<ProtoMessage, &'static str> {
             match message_type {
                 $(
                     $type_id => $struct::decode(buf)

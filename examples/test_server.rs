@@ -34,6 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut server = EspHomeApi::builder()
                         .api_version_major(1)
                         .api_version_minor(42)
+                        // .password("password".to_string())
                         .server_info("test_server_info".to_string())
                         .name("test_device".to_string())
                         .friendly_name("friendly_test_device".to_string())
