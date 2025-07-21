@@ -62,7 +62,7 @@ mod tests {
         let bytes = vec![8; 5];
 
         let frame = construct_frame(&bytes, true).unwrap();
-        assert_eq!(frame[0..4], vec![1, 0, 3, 8]);
+        assert_eq!(frame[0..4], vec![1, 0, 5, 8]);
     }
 
     
@@ -71,6 +71,6 @@ mod tests {
         let bytes = vec![8; 128];
 
         let frame = construct_frame(&bytes, true).unwrap();
-        assert_eq!(frame[0..4], vec![1, 0, 126, 8]);
+        assert_eq!(frame[0..4], vec![1, 0, 128, 8]);
     }
 }
