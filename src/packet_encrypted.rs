@@ -1,7 +1,10 @@
 
 use crate::parser;
 pub use crate::parser::ProtoMessage;
+use byteorder::BigEndian;
+use byteorder::ByteOrder;
 use log::debug;
+use log::trace;
 use noise_protocol::CipherState;
 use prost::encode_length_delimiter;
 use prost::decode_length_delimiter;
@@ -14,12 +17,14 @@ use noise_rust_crypto::Sha256;
 
 
 pub fn packet_to_message(buffer: &[u8], cipher_decrypt: &mut CipherState<ChaCha20Poly1305>) -> Result<ProtoMessage, Box<dyn std::error::Error>> {
-    let decrypted_message_frame = cipher_decrypt.decrypt_vec(&buffer).unwrap();
+    // trace!("Decrypt: N: {:?}", cipher_decrypt.get_next_n());
+    let decrypted_message_frame = cipher_decrypt.decrypt_vec(&buffer).unwrap(); // "Error during decryption".to_string()
 
-    let message_type = decrypted_message_frame[0];
-    let packet_content = &decrypted_message_frame[1..];
+    let message_type = BigEndian::read_u16(&decrypted_message_frame[0..2]) as usize;
+    let packet_content = &decrypted_message_frame[4..];
     debug!("Message type: {}", message_type);
     debug!("Message: {:?}", packet_content);
+
     Ok(parser::parse_proto_message(message_type, &packet_content).unwrap())
 }
 

@@ -1,3 +1,4 @@
+use crate::packet_encrypted;
 use crate::parser;
 use crate::parser::ProtoMessage;
 use crate::proto::version_2025_6_3::ConnectResponse;
@@ -11,10 +12,13 @@ use crate::proto::version_2025_6_3::SubscribeLogsResponse;
 use crate::to_encrypted_frame;
 use crate::to_unencrypted_frame;
 use base64::prelude::*;
+use byteorder::BigEndian;
+use byteorder::ByteOrder;
 use constant_time_eq::constant_time_eq;
 use log::debug;
 use log::info;
 use log::trace;
+use log::warn;
 use noise_protocol::CipherState;
 use noise_protocol::HandshakeState;
 use noise_protocol::patterns::noise_nn_psk0;
@@ -22,10 +26,12 @@ use noise_rust_crypto::ChaCha20Poly1305;
 use noise_rust_crypto::Sha256;
 use noise_rust_crypto::X25519;
 use prost::encode_length_delimiter;
+use tokio::time::sleep;
 use std::collections::HashMap;
 use std::str;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
@@ -177,7 +183,6 @@ impl EspHomeApi {
                 };
 
                 let encryption = encrypted_api.load(std::sync::atomic::Ordering::Relaxed);
-
                 if encryption {
                     {
                         let mut encryption_state_changer = encryption_state.lock().await;
@@ -266,10 +271,10 @@ impl EspHomeApi {
                                         encrypt_cypher_clone.lock().await;
                                     let encrypted_frame = to_encrypted_frame(
                                         &answer_message,
-                                        &mut (*encrypt_cipher_changer).as_mut().unwrap(),
+                                        &mut *encrypt_cipher_changer.as_mut().unwrap(),
                                     )
                                     .unwrap();
-                                    debug!("Sending encrypted Message: {:?}", &encrypted_frame);
+
                                     answer_buf = [answer_buf, encrypted_frame].concat();
                                 }
 
@@ -320,7 +325,7 @@ impl EspHomeApi {
                 // }
 
                 trace!("TCP Send: {:02X?}", &answer_buf);
-                trace!("TCP Send: {:?}", &answer_buf);
+                // trace!("TCP Send: {:?}", &answer_buf);
                 write
                     .write_all(&answer_buf)
                     .await
@@ -338,11 +343,11 @@ impl EspHomeApi {
         // Clone all necessary data before spawning the task
         let answer_messages_tx_clone = answer_messages_tx.clone();
         let api_components_clone = api_components_clone.clone();
-        let encrypted_api = self.encrypted_api.clone();
         let handshake_state_clone = self.handshake_state.clone();
         let encryption_state = self.encryption_state.clone();
         let encryption_key = self.encryption_key.clone();
         let encrypted_api = self.encrypted_api.clone();
+        let decrypt_cypher_clone = self.decrypt_cypher.clone();
         // Read Loop
         tokio::spawn(async move {
             let mut buf = vec![0; 1024];
@@ -367,64 +372,83 @@ impl EspHomeApi {
 
                     let message;
                     let preamble = buf[cursor] as usize;
+                    // trace!("Cursor: {:?}", &cursor);
+                    // trace!("n: {:?}", &n);
+
                     match preamble {
                         0 => {
                             // Cleartext
+                            
+                            // TODO: use dynamic length bits
                             let len = buf[cursor + 1] as usize;
                             message = cleartext_frame_to_message(
                                 &buf[cursor + 2..cursor + 3 + len].to_vec(),
                             )
                             .unwrap();
-                            cursor += 3 + len;
-                        }
-                        1 => {
-                            // Encrypted
+                        cursor += 3 + len;
+                    }
+                    1 => {
+                        // Encrypted
+                        
+                        let mut encryption_state_changer = encryption_state.lock().await;
+                        match *encryption_state_changer {
+                            EncryptionState::Uninitialized => {
+                                    encrypted_api.store(true, std::sync::atomic::Ordering::Relaxed);
 
-                            // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
-                            let mut handshake_state: HandshakeState<
-                                X25519,
-                                ChaCha20Poly1305,
-                                Sha256,
-                            > = HandshakeState::new(
-                                noise_nn_psk0(),
-                                false,
-                                b"NoiseAPIInit\0\0",
-                                None, // No static private key
-                                None,
-                                None,
-                                None,
-                            );
+                                    // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
+                                    let mut handshake_state: HandshakeState<
+                                        X25519,
+                                        ChaCha20Poly1305,
+                                        Sha256,
+                                    > = HandshakeState::new(
+                                        noise_nn_psk0(),
+                                        false,
+                                        // NEXT: This is somehow set from the first api message?
+                                        b"NoiseAPIInit\0\0",
+                                        None, // No static private key
+                                        None,
+                                        None,
+                                        None,
+                                    );
 
-                            encrypted_api.store(true, std::sync::atomic::Ordering::Relaxed);
-                            let noise_psk = BASE64_STANDARD
-                                .decode(encryption_key.as_ref().unwrap())
-                                .unwrap();
+                                    encrypted_api.store(true, std::sync::atomic::Ordering::Relaxed);
+                                    let noise_psk = BASE64_STANDARD
+                                        .decode(encryption_key.as_ref().unwrap())
+                                        .unwrap();
 
-                            handshake_state.push_psk(&noise_psk);
-                            handshake_state
-                                .read_message_vec(&buf[3 + 3 + 1..n])
-                                .expect("Failed to read message");
+                                    handshake_state.push_psk(&noise_psk);
+                                    handshake_state
+                                        .read_message_vec(&buf[3 + 3 + 1..n])
+                                        .expect("Failed to read message");
 
-                            {
-                                let mut mutex_changer = handshake_state_clone.lock().await;
-                                *mutex_changer = Option::Some(handshake_state);
-                                // mutex_changer.drop
-                                let mut encryption_state_changer = encryption_state.lock().await;
-                                *encryption_state_changer = EncryptionState::ClientHandshake;
+                                    {
+                                        let mut mutex_changer = handshake_state_clone.lock().await;
+                                        *mutex_changer = Option::Some(handshake_state);
+                                    }
+
+                                    answer_messages_tx_clone
+                                        .send(ProtoMessage::HelloResponse(hello_response.clone()))
+                                        .unwrap();
+                                    *encryption_state_changer = EncryptionState::ClientHandshake;
+
+                                    cursor += n;
+                                    continue;
+                                }
+                                EncryptionState::Initialized => {
+                                    let len = BigEndian::read_u16(&buf[cursor + 1..3]) as usize;
+                                    let decrypted_message = &buf[3..len + 3];
+                                    {
+                                        let mut decrypt_cipher_changer = decrypt_cypher_clone.lock().await;
+                                        message = packet_encrypted::packet_to_message(decrypted_message, &mut *decrypt_cipher_changer.as_mut().unwrap()).unwrap();
+                                    }
+                                    cursor += 3 + len + 3;
+
+                                }
+                                _ => {
+                                    debug!("Wrong encryption state: {:?}", *encryption_state_changer);
+                                    return;
+                                }
                             }
-
-                            encrypted_api.store(true, std::sync::atomic::Ordering::Relaxed);
-                            let hello_message = HelloResponse {
-                                api_version_major: 1,
-                                api_version_minor: 42,
-                                server_info: "Test Server".to_string(),
-                                name: "Test Server".to_string(),
-                            };
-                            answer_messages_tx_clone
-                                .send(ProtoMessage::HelloResponse(hello_message.clone()))
-                                .unwrap();
-
-                            return;
                         }
                         _ => {
                             debug!("Marker byte invalid: {}", preamble);
@@ -458,6 +482,8 @@ impl EspHomeApi {
                                 invalid = false;
                             }
 
+
+                            // TODO: Also set an authorized variable bool
                             let response_message = ConnectResponse {
                                 invalid_password: invalid,
                             };
@@ -605,7 +631,7 @@ mod tests {
 pub fn cleartext_frame_to_message(
     buffer: &[u8],
 ) -> Result<ProtoMessage, Box<dyn std::error::Error>> {
-    let message_type = buffer[0];
+    let message_type = buffer[0] as usize;
     let packet_content = &buffer[1..];
     debug!("Message type: {}", message_type);
     debug!("Message: {:?}", packet_content);

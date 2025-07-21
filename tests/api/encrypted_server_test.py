@@ -26,3 +26,9 @@ async def test_encrypted_server():  # test_server: TestServer):
     assert device_info.model == "Test Model"
     assert device_info.suggested_area == "Test Area"
 
+    entities, services = await api.list_entities_services()
+    print("entities", entities, services)
+
+    assert len(entities) == 0, entities
+
+    api.disconnect()

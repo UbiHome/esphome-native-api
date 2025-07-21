@@ -77,7 +77,7 @@ mod tests {
         assert_eq!(bytes, expected_bytes);
     }
 
-  #[test]
+    #[test]
     fn hello_message_short_encrypted() {
         let hello_message = ProtoMessage::HelloResponse(
             proto::version_2025_6_3::HelloResponse {

@@ -5,7 +5,7 @@ use log::debug;
 
 
 pub fn packet_to_message(buffer: &[u8]) -> Result<ProtoMessage, Box<dyn std::error::Error>> {
-    let message_type = buffer[0];
+    let message_type = buffer[0] as usize;
     let packet_content = &buffer[1..];
     debug!("Message type: {}", message_type);
     debug!("Message: {:?}", packet_content);
