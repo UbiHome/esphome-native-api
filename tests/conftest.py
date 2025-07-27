@@ -113,15 +113,16 @@ async def test_server():
 
 
 @pytest.fixture
-async def password_server():
-    """Fixture to run the test password_server."""
-    async with TestServer("password_server") as s:
-        yield s
-
-
-@pytest.fixture
 async def encrypted_server():
     """Fixture to run the test password_server."""
     async with TestServer("encrypted_server") as s:
         s.port = 7001
+        yield s
+
+
+@pytest.fixture
+async def password_server():
+    """Fixture to run the test password_server."""
+    async with TestServer("password_server") as s:
+        s.port = 7002
         yield s
