@@ -1,19 +1,15 @@
 
 from asyncio import sleep
-import os
-from pprint import pp
-from unittest import IsolatedAsyncioTestCase
 from unittest.mock import Mock
 import aioesphomeapi
 
 from tests.conftest import TestServer
 
 
-async def test_run():  # test_server: TestServer):
+async def test_run(test_server: TestServer):
     """test simple server"""
 
-    api = aioesphomeapi.APIClient("127.0.0.1", 7000, "")
-    # api = aioesphomeapi.APIClient("127.0.0.1", test_server.port, "")
+    api = aioesphomeapi.APIClient("127.0.0.1", test_server.port, "")
     await api.connect(login=False)
 
     # Test API Hello

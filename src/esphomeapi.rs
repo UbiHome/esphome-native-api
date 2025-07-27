@@ -459,11 +459,13 @@ impl EspHomeApi {
                             debug!("ConnectRequest: {:?}", connect_request);
                             let mut invalid = true;
                             if let Some(password) = password_clone.clone() {
-                                invalid = constant_time_eq(
+                                invalid = !constant_time_eq(
                                     connect_request.password.as_bytes(),
                                     password.as_bytes(),
                                 );
+                                trace!("Password set, check: {}", invalid);
                             } else {
+                                trace!("No password set, accepting all connections");
                                 invalid = false;
                             }
 

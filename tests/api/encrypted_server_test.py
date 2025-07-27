@@ -1,14 +1,19 @@
-
 from asyncio import sleep
 from unittest.mock import Mock
 import aioesphomeapi
 
+from tests.conftest import TestServer
 
-async def test_encrypted_server():  # test_server: TestServer):
+
+async def test_encrypted_server(encrypted_server: TestServer):
     """test encrypted server"""
 
-    api = aioesphomeapi.APIClient("127.0.0.1", 7001, None, noise_psk="px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA=")
-    # api = aioesphomeapi.APIClient("127.0.0.1", test_server.port, "")
+    api = aioesphomeapi.APIClient(
+        "127.0.0.1",
+        encrypted_server.port,
+        None,
+        noise_psk=encrypted_server.noise_psk,
+    )
     await api.connect(login=False)
 
     # Test API Hello
@@ -31,7 +36,9 @@ async def test_encrypted_server():  # test_server: TestServer):
     print("entities", entities, services)
 
     assert len(entities) == 5, entities
-    binary_sensor = next((e for e in entities if isinstance(e, aioesphomeapi.BinarySensorInfo)))
+    binary_sensor = next(
+        (e for e in entities if isinstance(e, aioesphomeapi.BinarySensorInfo))
+    )
     light = next((e for e in entities if isinstance(e, aioesphomeapi.LightInfo)))
     button = next((e for e in entities if isinstance(e, aioesphomeapi.ButtonInfo)))
     switch = next((e for e in entities if isinstance(e, aioesphomeapi.SwitchInfo)))

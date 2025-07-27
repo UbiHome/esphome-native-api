@@ -1,7 +1,6 @@
 import asyncio
 from asyncio.subprocess import Process
 import os
-import signal
 import socket
 from typing import Optional
 
@@ -15,6 +14,7 @@ class TestServer:
     _stdout_task = None
     _stderr_task = None
     port = 7000  # Default port for the test server
+    noise_psk = "px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA="
 
     def __init__(self, name: str = "test_server"):
         self.name = name
@@ -35,7 +35,7 @@ class TestServer:
         print("Waiting for server to start...")
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         while True:
-            result = sock.connect_ex(('127.0.0.1', 7000))
+            result = sock.connect_ex(('127.0.0.1', self.port))
             if result == 0:
                 print("Port is open")
                 break
@@ -123,4 +123,5 @@ async def password_server():
 async def encrypted_server():
     """Fixture to run the test password_server."""
     async with TestServer("encrypted_server") as s:
+        s.port = 7001
         yield s
