@@ -26,7 +26,7 @@ class TestServer:
         self.process = await asyncio.create_subprocess_shell(
             f"cargo run --example {self.name}",
             env=my_env,
-            cwd=os.path.join(__file__, ".."),
+            cwd=os.path.join(os.getcwd(), ".."),
         )
 
         self._stdout_task = asyncio.create_task(self._read_stdout())
