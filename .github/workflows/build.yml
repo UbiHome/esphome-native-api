@@ -138,6 +138,7 @@ jobs:
           poetry-version: 2.1.2          
       - name: Run tests
         run: |-
+          cargo build --examples
           cd tests
           poetry install
           poetry run pytest
