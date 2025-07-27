@@ -80,10 +80,10 @@ pub struct EspHomeApi {
 
     name: String,
 
-    #[builder(default = None, setter(strip_option))]
+    #[builder(default = None, setter(strip_option(fallback=password_opt)))]
     #[deprecated(note = "https://esphome.io/components/api.html#configuration-variables")]
     password: Option<String>,
-    #[builder(default = None, setter(strip_option))]
+    #[builder(default = None, setter(strip_option(fallback=encryption_key_opt)))]
     encryption_key: Option<String>,
 
     #[builder(default = 1)]
@@ -93,21 +93,41 @@ pub struct EspHomeApi {
     #[builder(default="Rust: esphome-native-api".to_string())]
     server_info: String,
 
-    #[builder(default = None, setter(strip_option))]
+    #[builder(default = None, setter(strip_option(fallback=friendly_name_opt)))]
     friendly_name: Option<String>,
 
-    #[builder(default = None, setter(strip_option))]
+    #[builder(default = None, setter(strip_option(fallback=mac_opt)))]
     mac: Option<String>,
 
-    #[builder(default = None, setter(strip_option))]
+    #[builder(default = None, setter(strip_option(fallback=model_opt)))]
     model: Option<String>,
 
-    #[builder(default = None, setter(strip_option))]
+    #[builder(default = None, setter(strip_option(fallback=manufacturer_opt)))]
     manufacturer: Option<String>,
-    #[builder(default = None, setter(strip_option))]
+    #[builder(default = None, setter(strip_option(fallback=suggested_area_opt)))]
     suggested_area: Option<String>,
-    #[builder(default = None, setter(strip_option))]
+    #[builder(default = None, setter(strip_option(fallback=bluetooth_mac_address_opt)))]
     bluetooth_mac_address: Option<String>,
+
+    #[builder(default = None, setter(strip_option(fallback=project_name_opt)))]
+    project_name: Option<String>,
+
+    #[builder(default = None, setter(strip_option(fallback=project_version_opt)))]
+    project_version: Option<String>,
+    #[builder(default = None, setter(strip_option(fallback=compilation_time_opt)))]
+    compilation_time: Option<String>,
+
+    #[builder(default = 0)]
+    legacy_bluetooth_proxy_version: u32,
+    #[builder(default = 0)]
+    bluetooth_proxy_feature_flags: u32,
+    #[builder(default = 0)]
+    legacy_voice_assistant_version: u32,
+    #[builder(default = 0)]
+    voice_assistant_feature_flags: u32,
+
+    #[builder(default = "2025.4.0".to_string())]
+    esphome_version: String,
 }
 
 /// Handles the EspHome Api, with encryption etc.
@@ -133,20 +153,20 @@ impl EspHomeApi {
             uses_password: false,
             name: self.name.clone(),
             mac_address: self.mac.clone().unwrap_or_default(),
-            esphome_version: "2025.4.0".to_owned(),
-            compilation_time: "".to_owned(),
+            esphome_version: self.esphome_version.clone(),
+            compilation_time: self.compilation_time.clone().unwrap_or_default(),
             model: self.model.clone().unwrap_or_default(),
             has_deep_sleep: false,
-            project_name: "".to_owned(),
-            project_version: "".to_owned(),
-            webserver_port: 8080,
+            project_name: self.project_name.clone().unwrap_or_default(),
+            project_version: self.project_version.clone().unwrap_or_default(),
+            webserver_port: 0,
             // See https://github.com/esphome/aioesphomeapi/blob/c1fee2f4eaff84d13ca71996bb272c28b82314fc/aioesphomeapi/model.py#L154
-            legacy_bluetooth_proxy_version: 1,
-            bluetooth_proxy_feature_flags: 1,
+            legacy_bluetooth_proxy_version: self.legacy_bluetooth_proxy_version,
+            bluetooth_proxy_feature_flags: self.bluetooth_proxy_feature_flags,
             manufacturer: self.manufacturer.clone().unwrap_or_default(),
             friendly_name: self.friendly_name.clone().unwrap_or(self.name.clone()),
-            legacy_voice_assistant_version: 0,
-            voice_assistant_feature_flags: 0,
+            legacy_voice_assistant_version: self.legacy_voice_assistant_version,
+            voice_assistant_feature_flags: self.voice_assistant_feature_flags,
             suggested_area: self.suggested_area.clone().unwrap_or_default(),
             bluetooth_mac_address: self.bluetooth_mac_address.clone().unwrap_or_default(),
         };
