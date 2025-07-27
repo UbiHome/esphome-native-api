@@ -13,11 +13,11 @@ class TestServer:
     process: Optional[Process] = None
     _stdout_task = None
     _stderr_task = None
-    port = 7000  # Default port for the test server
     noise_psk = "px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA="
 
-    def __init__(self, name: str = "test_server"):
+    def __init__(self, name: str = "test_server", port: int = 7000):
         self.name = name
+        self.port = port
 
     async def __aenter__(self):
         my_env = os.environ.copy()
@@ -115,14 +115,12 @@ async def test_server():
 @pytest.fixture
 async def encrypted_server():
     """Fixture to run the test password_server."""
-    async with TestServer("encrypted_server") as s:
-        s.port = 7001
+    async with TestServer("encrypted_server", port=7001) as s:
         yield s
 
 
 @pytest.fixture
 async def password_server():
     """Fixture to run the test password_server."""
-    async with TestServer("password_server") as s:
-        s.port = 7002
+    async with TestServer("password_server", port=7002) as s:
         yield s
