@@ -9,7 +9,7 @@ import aioesphomeapi
 from tests.conftest import TestServer
 
 
-async def test_run(): #test_server: TestServer):
+async def test_run():  # test_server: TestServer):
     """test simple server"""
 
     api = aioesphomeapi.APIClient("127.0.0.1", 7000, "")
@@ -125,4 +125,5 @@ async def test_run(): #test_server: TestServer):
     #   await sleep(0.1)
     # state = mock.call_args.args[0]
     # assert state.state == True
+    await api.disconnect()
 

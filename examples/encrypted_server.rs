@@ -50,18 +50,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .expect("Failed to start server");
 
                 debug!("Server started");
-                // sleep(Duration::from_secs(10)).await;
+                sleep(Duration::from_secs(4)).await;
 
-                // let message = ProtoMessage::SensorStateResponse(
-                //     SensorStateResponse {
-                //         key: 0,
-                //         state: 25.0,
-                //         missing_state: false,
-                //     },
-                // );
-                // tx.send(message.clone()).expect("Failed to send message");
+                let message = ProtoMessage::SensorStateResponse(
+                    SensorStateResponse {
+                        key: 0,
+                        state: 25.0,
+                        missing_state: false,
+                    },
+                );
+                tx.send(message.clone()).expect("Failed to send message");
 
-                // debug!("Queue message to sent");
                 // Wait indefinitely for the interrupts
                 let future = future::pending();
                 let () = future.await;

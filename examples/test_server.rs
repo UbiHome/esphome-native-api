@@ -144,13 +144,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         missing_state: false,
                     },
                 );
-                tx.send(message.clone()).expect("Failed to send message");
+                for n in 1..=10 {
+                sleep(Duration::from_secs(3)).await;
+                    debug!("Sending message number {}", n);
+                    tx.send(message.clone()).expect("Failed to send message");
+                }
 
                 debug!("Queue message to sent");
 
                 // Wait indefinitely for the interrupts
                 let future = future::pending();
                 let () = future.await;
+                tx.send(message.clone()).expect("Failed to send message");
             });
         }
     };

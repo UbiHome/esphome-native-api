@@ -16,6 +16,7 @@ use byteorder::BigEndian;
 use byteorder::ByteOrder;
 use constant_time_eq::constant_time_eq;
 use log::debug;
+use log::error;
 use log::info;
 use log::trace;
 use log::warn;
@@ -166,6 +167,18 @@ impl EspHomeApi {
         let decrypt_cypher_clone = self.decrypt_cypher.clone();
         let encryption_state = self.encryption_state.clone();
         let handshake_state_clone = self.handshake_state.clone();
+        let answer_messages_tx_clone = answer_messages_tx.clone();
+        let messages_tx_clone = messages_tx.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = answer_messages_tx_clone.closed() => {
+                    info!("CLOSED");
+                }
+                _ = messages_tx_clone.closed() => {
+                    info!("CLOSED");
+                }
+            };
+        });
         // Write Loop
         tokio::spawn(async move {
             let mut disconnect = false;
@@ -173,7 +186,7 @@ impl EspHomeApi {
                 let mut answer_buf: Vec<u8> = vec![];
                 let answer_message: ProtoMessage;
                 // Wait for any new message
-                tokio::select! {
+                tokio::select! {                    
                     message = answer_messages_rx.recv() => {
                         answer_message = message.unwrap();
                     }
@@ -296,40 +309,15 @@ impl EspHomeApi {
                     _ => {}
                 }
 
-                // loop {
-                //     let answer_message = answer_messages_rx.try_recv();
-                //     match answer_message {
-                //         Ok(answer_message) => {
-                //             debug!("Answer message: {:?}", answer_message);
-                //             if encrypted_api.load(std::sync::atomic::Ordering::Relaxed) {
-                //                 answer_buf =
-                //                     [answer_buf, to_unencrypted_frame(&answer_message).unwrap()]
-                //                         .concat();
-                //             } else {
-                //             }
-
-                //             match answer_message {
-                //                 ProtoMessage::DisconnectResponse(_) => {
-                //                     disconnect = true;
-                //                 }
-                //                 ProtoMessage::ConnectResponse(response) => {
-                //                     if response.invalid_password {
-                //                         disconnect = true;
-                //                     }
-                //                 }
-                //                 _ => {}
-                //             }
-                //         }
-                //         Err(_) => break,
-                //     }
-                // }
-
                 trace!("TCP Send: {:02X?}", &answer_buf);
-                // trace!("TCP Send: {:?}", &answer_buf);
-                write
-                    .write_all(&answer_buf)
-                    .await
-                    .expect("failed to write data to socket");
+                
+                match write.write_all(&answer_buf).await {
+                    Err(err) => {
+                        error!("Failed to write data to socket: {:?}", err)
+                    }
+                    _ => {}
+                }
+
                 write.flush().await.expect("failed to flush data to socket");
 
                 if disconnect {
@@ -386,13 +374,13 @@ impl EspHomeApi {
                             )
                             .unwrap();
                         cursor += 3 + len;
-                    }
-                    1 => {
-                        // Encrypted
-                        
-                        let mut encryption_state_changer = encryption_state.lock().await;
-                        match *encryption_state_changer {
-                            EncryptionState::Uninitialized => {
+                        }
+                        1 => {
+                            // Encrypted
+                            
+                            let mut encryption_state_changer = encryption_state.lock().await;
+                            match *encryption_state_changer {
+                                EncryptionState::Uninitialized => {
                                     encrypted_api.store(true, std::sync::atomic::Ordering::Relaxed);
 
                                     // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255

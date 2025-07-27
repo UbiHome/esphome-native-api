@@ -31,4 +31,16 @@ async def test_encrypted_server():  # test_server: TestServer):
 
     assert len(entities) == 0, entities
 
+    mock = Mock()
+    # # Subscribe to the state changes
+    api.subscribe_states(mock)
+
+    # State update should be send back
+    while not mock.called:
+        await sleep(0.1)
+    state = mock.call_args.args[0]
+    assert isinstance(state, aioesphomeapi.SensorState)
+    assert state.state == 25.0
+    mock.reset_mock()
+
     api.disconnect()
