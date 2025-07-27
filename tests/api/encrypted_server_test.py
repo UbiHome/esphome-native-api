@@ -2,10 +2,10 @@ from asyncio import sleep
 from unittest.mock import Mock
 import aioesphomeapi
 
-from tests.conftest import TestServer
+from tests.conftest import EspHomeTestServer
 
 
-async def test_encrypted_server(encrypted_server: TestServer):
+async def test_encrypted_server(encrypted_server: EspHomeTestServer):
     """test encrypted server"""
 
     api = aioesphomeapi.APIClient(
@@ -104,4 +104,4 @@ async def test_encrypted_server(encrypted_server: TestServer):
     assert state.state == 25.0
     mock.reset_mock()
 
-    api.disconnect()
+    await api.disconnect()

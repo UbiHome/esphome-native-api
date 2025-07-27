@@ -7,7 +7,7 @@ from typing import Optional
 import pytest
 
 
-class TestServer:
+class EspHomeTestServer:
     """A context manager to run a test server in the background."""
 
     process: Optional[Process] = None
@@ -108,19 +108,19 @@ class TestServer:
 @pytest.fixture
 async def test_server():
     """Fixture to run the test server."""
-    async with TestServer() as s:
+    async with EspHomeTestServer() as s:
         yield s
 
 
 @pytest.fixture
 async def encrypted_server():
-    """Fixture to run the test password_server."""
-    async with TestServer("encrypted_server", port=7001) as s:
+    """Fixture to run the test encrypted_server."""
+    async with EspHomeTestServer("encrypted_server", port=7001) as s:
         yield s
 
 
 @pytest.fixture
 async def password_server():
     """Fixture to run the test password_server."""
-    async with TestServer("password_server", port=7002) as s:
+    async with EspHomeTestServer("password_server", port=7002) as s:
         yield s

@@ -3,10 +3,10 @@ from asyncio import sleep
 from unittest.mock import Mock
 import aioesphomeapi
 
-from tests.conftest import TestServer
+from tests.conftest import EspHomeTestServer
 
 
-async def test_run(test_server: TestServer):
+async def test_run(test_server: EspHomeTestServer):
     """test simple server"""
 
     api = aioesphomeapi.APIClient("127.0.0.1", test_server.port, "")
