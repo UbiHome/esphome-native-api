@@ -1,6 +1,6 @@
 use octocrab::Octocrab;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Seek, Write};
 use std::path::Path;
 use std::env;
 const current_version: &str = "2025.6.3";
@@ -105,21 +105,29 @@ async fn main() {
     let mod_file = Path::new(root_output_dir).join("mod.rs");
     fs::write(mod_file, mod_file_content).unwrap();
 
+    let mut file = File::open("../Cargo.toml").unwrap();
+
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).unwrap();
+    let content_str = String::from_utf8_lossy(&buf);
+    let pos = content_str.find("[features]").unwrap(); 
+    println!("Found \"[features]\" at position: {}", pos);
+    
+    
     let mut file = OpenOptions::new()
     .write(true)
-    .append(true)
     .open("../Cargo.toml")
     .unwrap();
-
-    file.write(b"\n[features]\n").unwrap();
+    file.seek(std::io::SeekFrom::Start(pos.try_into().unwrap())).unwrap();
+    file.write(b"[features]\n").unwrap();
     let default_feature_flag = get_package_name(current_version);
-    file.write(format!("default = [\"{}\"]\n", default_feature_flag).as_bytes()).unwrap();
-    
+    file.write(format!("default = [\"std\", \"{}\"]\n", default_feature_flag).as_bytes()).unwrap();
+    file.write(b"std = []\n").unwrap();
 
     for version in versions {
         file.write(format!("{} = []\n", version).as_bytes()).unwrap();
     }
-
-
+    let pos = file.stream_position().unwrap();
+    file.set_len(pos).unwrap();
 
 }

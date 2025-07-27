@@ -24,6 +24,10 @@ tokio = { version = "1", features = ["full"] }
 prost = "0.13.5"
 typed-builder = "0.21.0"
 constant_time_eq = "0.4.2"
+base64 = "0.22.1"
+noise-rust-crypto = "0.6.2"
+noise-protocol = "0.2.0"
+byteorder = "1.5.0"
 
 [workspace]
 resolver = "2"
@@ -31,4 +35,27 @@ members = ["generator"]
 
 [dev-dependencies]
 pretty_env_logger = "0.5.0"
+test-log = { version = "0.2.16", features = ["log", "color"] }
 
+[features]
+default = ["std", "version_2025_6_3"]
+std = []
+version_2025_7_3 = []
+version_2025_7_2 = []
+version_2025_7_1 = []
+version_2025_7_0 = []
+version_2025_6_3 = []
+version_2025_6_2 = []
+version_2025_6_1 = []
+version_2025_6_0 = []
+version_2025_5_2 = []
+version_2025_5_1 = []
+version_2025_5_0 = []
+version_2025_4_2 = []
+version_2025_4_1 = []
+version_2025_4_0 = []
+version_2025_3_3 = []
+version_2025_3_2 = []
+version_2025_3_1 = []
+version_2025_3_0 = []
+version_2025_2_2 = []

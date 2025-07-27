@@ -1,22 +1,18 @@
 use std::{future, net::SocketAddr, time::Duration};
 
-use esphome_native_api::esphomeapi::EspHomeApi;
-use esphome_native_api::parser::ProtoMessage;
-use esphome_native_api::proto::version_2025_6_3::{ListEntitiesButtonResponse, ListEntitiesDoneResponse};
-use esphome_native_api::proto::version_2025_6_3::{
-    ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse,
-    ListEntitiesSwitchResponse, SensorStateResponse,
-};
-use log::{LevelFilter, debug, info};
+use esphome_native_api::proto::version_2025_6_3::{ListEntitiesBinarySensorResponse, ListEntitiesDoneResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse, ListEntitiesSwitchResponse, SensorStateResponse};
+use log::{debug, info, LevelFilter};
 use tokio::{net::TcpSocket, signal, time::sleep};
+use esphome_native_api::proto::version_2025_6_3::ListEntitiesButtonResponse;
+use esphome_native_api::parser::ProtoMessage;
+use esphome_native_api::esphomeapi::EspHomeApi;
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    pretty_env_logger::formatted_builder()
-        .filter_level(LevelFilter::Debug)
-        .init();
+    pretty_env_logger::formatted_builder().filter_level(LevelFilter::Trace).init();
 
-    let addr: SocketAddr = SocketAddr::from(([127, 0, 0, 1], 7000));
+    let addr: SocketAddr = SocketAddr::from(([127, 0, 0, 1], 7001));
     let socket = TcpSocket::new_v4().unwrap();
     socket.set_reuseaddr(true).unwrap();
 
@@ -26,15 +22,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug!("Listening on: {}", addr);
 
     let main_server = async {
+
         loop {
-            let (stream, _) = listener
-                .accept()
-                .await
+            let (stream, _) = listener.accept().await
                 .expect("Failed to accept connection");
             debug!("Accepted request from {}", stream.peer_addr().unwrap());
 
             // Spawn a tokio task to serve multiple connections concurrently
             tokio::task::spawn(async move {
+            
                 let mut server = EspHomeApi::builder()
                     .api_version_major(1)
                     .api_version_minor(42)
@@ -47,8 +43,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .manufacturer("Test Inc.".to_string())
                     .model("Test Model".to_string())
                     .suggested_area("Test Area".to_string())
+                    .encryption_key("px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA=".to_string())
                     .build();
 
+               
                 let entities = vec![
                     // All supported entities in alphabetical order
                     ProtoMessage::ListEntitiesBinarySensorResponse(
@@ -158,13 +156,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     tx.send(message.clone()).expect("Failed to send message");
                 }
 
+
                 // Wait indefinitely for the interrupts
                 let future = future::pending();
                 let () = future.await;
             });
         }
     };
-
+    
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -190,4 +189,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Stopped");
 
     std::process::exit(0);
+
 }

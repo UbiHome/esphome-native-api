@@ -34,6 +34,5 @@ jobs:
       - run: pip install mkdocs-material[imaging] pillow cairosvg mkdocs-awesome-nav mkdocs-macros-plugin mkdocs-git-revision-date-localized-plugin
 
       - run: | 
-          cp README.md documentation/docs/index.md
           cd documentation
           mkdocs gh-deploy --force

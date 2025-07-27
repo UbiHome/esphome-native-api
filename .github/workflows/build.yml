@@ -111,3 +111,35 @@ jobs:
           # Add "--locked" again when release please is not updating all Cargo.toml files
           args: "--verbose"
           strip: false
+
+  e2e-test:
+    name: E2E Test
+    needs: generate_protos
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download proto source files
+        uses: actions/download-artifact@v4
+        with:
+          name: proto_src_files
+          path: src/proto
+      - name: Download cargo.toml
+        uses: actions/download-artifact@v4
+        with:
+          name: cargo_toml
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      - uses: abatilo/actions-poetry@v3
+        with:
+          poetry-version: 2.1.2          
+      - name: Run tests
+        run: |-
+          cargo build --examples
+          cd tests
+          poetry install
+          poetry run pytest
+

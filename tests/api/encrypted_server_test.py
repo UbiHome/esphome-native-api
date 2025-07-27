@@ -1,4 +1,3 @@
-
 from asyncio import sleep
 from unittest.mock import Mock
 import aioesphomeapi
@@ -6,10 +5,15 @@ import aioesphomeapi
 from tests.conftest import EspHomeTestServer
 
 
-async def test_run(test_server: EspHomeTestServer):
-    """test simple server"""
+async def test_encrypted_server(encrypted_server: EspHomeTestServer):
+    """test encrypted server"""
 
-    api = aioesphomeapi.APIClient("127.0.0.1", test_server.port, "")
+    api = aioesphomeapi.APIClient(
+        "127.0.0.1",
+        encrypted_server.port,
+        None,
+        noise_psk=encrypted_server.noise_psk,
+    )
     await api.connect(login=False)
 
     # Test API Hello
@@ -32,7 +36,9 @@ async def test_run(test_server: EspHomeTestServer):
     print("entities", entities, services)
 
     assert len(entities) == 5, entities
-    binary_sensor = next((e for e in entities if isinstance(e, aioesphomeapi.BinarySensorInfo)))
+    binary_sensor = next(
+        (e for e in entities if isinstance(e, aioesphomeapi.BinarySensorInfo))
+    )
     light = next((e for e in entities if isinstance(e, aioesphomeapi.LightInfo)))
     button = next((e for e in entities if isinstance(e, aioesphomeapi.ButtonInfo)))
     switch = next((e for e in entities if isinstance(e, aioesphomeapi.SwitchInfo)))
@@ -98,28 +104,4 @@ async def test_run(test_server: EspHomeTestServer):
     assert state.state == 25.0
     mock.reset_mock()
 
-    # Test switching the switch on via command
-    # api.switch_command(0, True)
-
-    # # Test switching the switch off via command
-    # api.switch_command(0, False)
-    # assert wait_and_get_file(switch_mock) == "false\n"
-    # # State update should be send back
-    # while not mock.called:
-    #   await sleep(0.1)
-    # state = mock.call_args.args[0]
-    # assert state.state == False
-    # mock.reset_mock()
-    # os.remove(switch_mock)
-
-    # # Test switching the switch on via local change
-    # with open(switch_mock, "w") as f:
-    #   f.write("true")
-
-    # # Wait for the state change
-    # while not mock.called:
-    #   await sleep(0.1)
-    # state = mock.call_args.args[0]
-    # assert state.state == True
     await api.disconnect()
-

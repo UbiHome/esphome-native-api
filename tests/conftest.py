@@ -1,23 +1,23 @@
 import asyncio
 from asyncio.subprocess import Process
 import os
-import signal
 import socket
 from typing import Optional
 
 import pytest
 
 
-class TestServer:
+class EspHomeTestServer:
     """A context manager to run a test server in the background."""
 
     process: Optional[Process] = None
     _stdout_task = None
     _stderr_task = None
-    port = 7000  # Default port for the test server
+    noise_psk = "px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA="
 
-    def __init__(self, name: str = "test_server"):
+    def __init__(self, name: str = "test_server", port: int = 7000):
         self.name = name
+        self.port = port
 
     async def __aenter__(self):
         my_env = os.environ.copy()
@@ -26,7 +26,7 @@ class TestServer:
         self.process = await asyncio.create_subprocess_shell(
             f"cargo run --example {self.name}",
             env=my_env,
-            cwd=os.path.join(__file__, ".."),
+            cwd=os.path.join(os.getcwd(), ".."),
         )
 
         self._stdout_task = asyncio.create_task(self._read_stdout())
@@ -35,7 +35,7 @@ class TestServer:
         print("Waiting for server to start...")
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         while True:
-            result = sock.connect_ex(('127.0.0.1', 7000))
+            result = sock.connect_ex(('127.0.0.1', self.port))
             if result == 0:
                 print("Port is open")
                 break
@@ -108,13 +108,19 @@ class TestServer:
 @pytest.fixture
 async def test_server():
     """Fixture to run the test server."""
-    async with TestServer() as s:
+    async with EspHomeTestServer() as s:
+        yield s
+
+
+@pytest.fixture
+async def encrypted_server():
+    """Fixture to run the test encrypted_server."""
+    async with EspHomeTestServer("encrypted_server", port=7001) as s:
         yield s
 
 
 @pytest.fixture
 async def password_server():
     """Fixture to run the test password_server."""
-    async with TestServer("password_server") as s:
+    async with EspHomeTestServer("password_server", port=7002) as s:
         yield s
-
