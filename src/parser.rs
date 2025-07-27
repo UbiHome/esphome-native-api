@@ -66,6 +66,7 @@ macro_rules! proto_message_mappings {
             match message {
                 $(
                     ProtoMessage::$struct(msg) => {
+                        
                         Ok(msg.encode_to_vec())
                     }
                 )*

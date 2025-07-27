@@ -1,3 +1,5 @@
+use crate::frame::to_encrypted_frame;
+use crate::frame::to_unencrypted_frame;
 use crate::packet_encrypted;
 use crate::parser;
 use crate::parser::ProtoMessage;
@@ -5,12 +7,7 @@ use crate::proto::version_2025_6_3::ConnectResponse;
 use crate::proto::version_2025_6_3::DeviceInfoResponse;
 use crate::proto::version_2025_6_3::DisconnectResponse;
 use crate::proto::version_2025_6_3::HelloResponse;
-use crate::proto::version_2025_6_3::ListEntitiesDoneResponse;
 use crate::proto::version_2025_6_3::PingResponse;
-use crate::proto::version_2025_6_3::SubscribeHomeAssistantStateResponse;
-use crate::proto::version_2025_6_3::SubscribeLogsResponse;
-use crate::to_encrypted_frame;
-use crate::to_unencrypted_frame;
 use base64::prelude::*;
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
@@ -19,20 +16,15 @@ use log::debug;
 use log::error;
 use log::info;
 use log::trace;
-use log::warn;
 use noise_protocol::CipherState;
 use noise_protocol::HandshakeState;
 use noise_protocol::patterns::noise_nn_psk0;
 use noise_rust_crypto::ChaCha20Poly1305;
 use noise_rust_crypto::Sha256;
 use noise_rust_crypto::X25519;
-use prost::encode_length_delimiter;
-use tokio::time::sleep;
 use std::collections::HashMap;
-use std::str;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
@@ -118,15 +110,20 @@ pub struct EspHomeApi {
     bluetooth_mac_address: Option<String>,
 }
 
+/// Handles the EspHome Api, with encryption etc.
 impl EspHomeApi {
+
+    /// Starts the server and returns a broadcast channel for messages, and a
+    /// broadcast receiver for all messages not handled by the abstraction
     pub async fn start(
         &mut self,
         tcp_stream: TcpStream,
-    ) -> Result<(broadcast::Sender<ProtoMessage>), Box<dyn std::error::Error>> {
+    ) -> Result<(broadcast::Sender<ProtoMessage>, broadcast::Receiver<ProtoMessage>), Box<dyn std::error::Error>> {
         // Channel for direct answers (prioritized when sending)
         let (answer_messages_tx, mut answer_messages_rx) = broadcast::channel::<ProtoMessage>(16);
         // Channel for normal messages (e.g. state updates)
         let (messages_tx, mut messages_rx) = broadcast::channel::<ProtoMessage>(16);
+        let (outgoing_messages_tx, mut outgoing_messages_rx) = broadcast::channel::<ProtoMessage>(16);
 
         // Asynchronously wait for an inbound socket.
         let (mut read, mut write) = tcp_stream.into_split();
@@ -487,18 +484,7 @@ impl EspHomeApi {
                                 .send(ProtoMessage::DisconnectResponse(response_message))
                                 .unwrap();
                         }
-                        ProtoMessage::ListEntitiesRequest(list_entities_request) => {
-                            debug!("ListEntitiesRequest: {:?}", list_entities_request);
 
-                            for (key, sensor) in &api_components_clone {
-                                answer_messages_tx_clone.send(sensor.clone()).unwrap();
-                            }
-                            answer_messages_tx_clone
-                                .send(ProtoMessage::ListEntitiesDoneResponse(
-                                    ListEntitiesDoneResponse {},
-                                ))
-                                .unwrap();
-                        }
                         ProtoMessage::PingRequest(ping_request) => {
                             debug!("PingRequest: {:?}", ping_request);
                             let response_message = PingResponse {};
@@ -506,101 +492,17 @@ impl EspHomeApi {
                                 .send(ProtoMessage::PingResponse(response_message))
                                 .unwrap();
                         }
-                        ProtoMessage::SubscribeLogsRequest(request) => {
-                            debug!("SubscribeLogsRequest: {:?}", request);
-                            let response_message = SubscribeLogsResponse {
-                                level: 0,
-                                message: "Test log".to_string().as_bytes().to_vec(),
-                                send_failed: false,
-                            };
-                            answer_messages_tx_clone
-                                .send(ProtoMessage::SubscribeLogsResponse(response_message))
-                                .unwrap();
-                        }
-                        ProtoMessage::SubscribeBluetoothLeAdvertisementsRequest(request) => {
-                            debug!("SubscribeBluetoothLeAdvertisementsRequest: {:?}", request);
-                        }
-                        ProtoMessage::UnsubscribeBluetoothLeAdvertisementsRequest(request) => {
-                            debug!("UnsubscribeBluetoothLeAdvertisementsRequest: {:?}", request);
-                        }
-                        ProtoMessage::SubscribeStatesRequest(subscribe_states_request) => {
-                            debug!("SubscribeStatesRequest: {:?}", subscribe_states_request);
-                        }
-                        ProtoMessage::SubscribeHomeassistantServicesRequest(request) => {
-                            debug!("SubscribeHomeassistantServicesRequest: {:?}", request);
-                        }
-                        ProtoMessage::SubscribeHomeAssistantStatesRequest(
-                            subscribe_homeassistant_services_request,
-                        ) => {
-                            debug!(
-                                "SubscribeHomeAssistantStatesRequest: {:?}",
-                                subscribe_homeassistant_services_request
-                            );
-                            let response_message = SubscribeHomeAssistantStateResponse {
-                                entity_id: "test".to_string(),
-                                attribute: "test".to_string(),
-                                once: true,
-                            };
-                        }
-                        ProtoMessage::ButtonCommandRequest(button_command_request) => {
-                            debug!("ButtonCommandRequest: {:?}", button_command_request);
-                            let button = api_components_clone
-                                .get(&button_command_request.key)
-                                .unwrap();
-                            match button {
-                                ProtoMessage::ListEntitiesButtonResponse(button) => {
-                                    debug!("ButtonCommandRequest: {:?}", button);
-                                    // let msg = ChangedMessage::ButtonPress {
-                                    //     key: button.unique_id.clone(),
-                                    // };
 
-                                    // cloned_sender.send(msg).unwrap();
-                                }
-                                _ => {}
-                            }
-                        }
-                        ProtoMessage::SwitchCommandRequest(switch_command_request) => {
-                            debug!("SwitchCommandRequest: {:?}", switch_command_request);
-                            let switch_entity = api_components_clone
-                                .get(&switch_command_request.key)
-                                .unwrap();
-                            match switch_entity {
-                                ProtoMessage::ListEntitiesSwitchResponse(switch_entity) => {
-                                    debug!("switch_entityCommandRequest: {:?}", switch_entity);
-                                    // let msg = ChangedMessage::SwitchStateCommand {
-                                    //     key: switch_entity.unique_id.clone(),
-                                    //     state: switch_command_request.state,
-                                    // };
-
-                                    // cloned_sender.send(msg).unwrap();
-                                }
-                                _ => {}
-                            }
-                        }
-                        _ => {
-                            debug!("Ignore message type: {:?}", message);
-                            return;
+                        message => {
+                            outgoing_messages_tx.send(message);
                         }
                     }
                 }
             }
         });
 
-        Ok((messages_tx.clone()))
+        Ok((messages_tx.clone(), outgoing_messages_rx))
     }
-
-    pub fn add_entity(&mut self, entity_id: &str, entity: ProtoMessage) {
-        self.components_key_id
-            .insert(entity_id.to_string(), self.current_key);
-        self.components_by_key.insert(self.current_key, entity);
-
-        self.current_key += 1;
-    }
-
-    // fn receive(&self) ->  {
-    //     // Receive message from server
-    //     String::new()
-    // }
 }
 
 #[cfg(test)]

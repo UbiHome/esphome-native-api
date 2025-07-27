@@ -38,7 +38,8 @@ pretty_env_logger = "0.5.0"
 test-log = { version = "0.2.16", features = ["log", "color"] }
 
 [features]
-default = ["version_2025_6_3"]
+default = ["std", "version_2025_6_3"]
+std = []
 version_2025_6_3 = []
 version_2025_6_2 = []
 version_2025_6_1 = []

@@ -1,10 +1,10 @@
 use std::{future, net::SocketAddr, time::Duration};
 
-use esphome_native_api::{proto::version_2025_6_3::{ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse, ListEntitiesSwitchResponse, SensorStateResponse}};
+use esphome_native_api::proto::version_2025_6_3::{ListEntitiesBinarySensorResponse, ListEntitiesDoneResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse, ListEntitiesSwitchResponse, SensorStateResponse};
 use log::{debug, info, LevelFilter};
 use tokio::{net::TcpSocket, signal, time::sleep};
 use esphome_native_api::proto::version_2025_6_3::ListEntitiesButtonResponse;
-use esphome_native_api::ProtoMessage;
+use esphome_native_api::parser::ProtoMessage;
 use esphome_native_api::esphomeapi::EspHomeApi;
 
 
@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Spawn a tokio task to serve multiple connections concurrently
             tokio::task::spawn(async move {
-
+            
                 let mut server = EspHomeApi::builder()
                     .api_version_major(1)
                     .api_version_minor(42)
@@ -46,34 +46,120 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .encryption_key("px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA=".to_string())
                     .build();
 
-                let tx = server.start(stream).await
-                    .expect("Failed to start server");
-
-                debug!("Server started");
-                sleep(Duration::from_secs(4)).await;
-
-                let message = ProtoMessage::SensorStateResponse(
-                    SensorStateResponse {
+               
+                let entities = vec![
+                    // All supported entities in alphabetical order
+                    ProtoMessage::ListEntitiesBinarySensorResponse(
+                        ListEntitiesBinarySensorResponse {
+                            object_id: "test_binary_sensor_object_id".to_string(),
+                            key: 3,
+                            name: "test_binary_sensor".to_string(),
+                            unique_id: "test_binary_sensor_unique_id".to_string(),
+                            icon: "mdi:test-binary-sensor-icon".to_string(),
+                            device_class: "test_binary_sensor_device_class".to_string(),
+                            is_status_binary_sensor: true,
+                            disabled_by_default: false,
+                            entity_category: 0, // EntityCategory::None as i32
+                        },
+                    ),
+                    ProtoMessage::ListEntitiesButtonResponse(ListEntitiesButtonResponse {
+                        object_id: "test_button_object_id".to_string(),
                         key: 0,
-                        state: 25.0,
-                        missing_state: false,
-                    },
-                );
-                tx.send(message.clone()).expect("Failed to send message");
+                        name: "test_button".to_string(),
+                        unique_id: "test_button_unique_id".to_string(),
+                        icon: "mdi:test-button-icon".to_string(),
+                        disabled_by_default: false,
+                        entity_category: 0,
+                        device_class: "test_button_device_class".to_string(),
+                    }),
+                    ProtoMessage::ListEntitiesLightResponse(ListEntitiesLightResponse {
+                        object_id: "test_light_object_id".to_string(),
+                        key: 4,
+                        name: "test_light".to_string(),
+                        unique_id: "test_light_unique_id".to_string(),
+                        icon: "mdi:test-light-icon".to_string(),
+                        disabled_by_default: false,
+                        entity_category: 0, // EntityCategory::None as i32
+                        supported_color_modes: vec![], // Can be populated based on capabilities
+                        min_mireds: 153.0,
+                        max_mireds: 500.0,
+                        effects: vec![], // Light effects can be added later
+                        legacy_supports_brightness: false,
+                        legacy_supports_rgb: false,
+                        legacy_supports_white_value: false,
+                        legacy_supports_color_temperature: false,
+                    }),
+                    ProtoMessage::ListEntitiesSensorResponse(ListEntitiesSensorResponse {
+                        object_id: "test_sensor_object_id".to_string(),
+                        key: 2,
+                        name: "test_sensor".to_string(),
+                        unique_id: "test_sensor_unique_id".to_string(),
+                        icon: "mdi:test-sensor-icon".to_string(),
+                        unit_of_measurement: "°C".to_string(),
+                        accuracy_decimals: 2,
+                        force_update: false,
+                        device_class: "temperature".to_string(),
+                        state_class: 1, // SensorStateClass::StateClassMeasurement as i32
+                        legacy_last_reset_type: 0, // SensorLastResetType::LastResetNone as i32
+                        disabled_by_default: false,
+                        entity_category: 0, // EntityCategory::None as i32
+                    }),
+                    ProtoMessage::ListEntitiesSwitchResponse(ListEntitiesSwitchResponse {
+                        object_id: "test_switch_object_id".to_string(),
+                        key: 1,
+                        name: "test_switch".to_string(),
+                        unique_id: "test_switch_unique_id".to_string(),
+                        icon: "mdi:test-switch-icon".to_string(),
+                        device_class: "test_switch_device_class".to_string(),
+                        disabled_by_default: false,
+                        entity_category: 0,
+                        assumed_state: false,
+                    }),
+                ];
+
+                let (tx, mut rx) = server.start(stream).await.expect("Failed to start server");
+                let tx_clone = tx.clone();
+                debug!("Server started");
+                sleep(Duration::from_secs(3)).await;
+
+                tokio::spawn(async move {
+                    loop {
+                        let message = rx.recv().await.unwrap();
+                        // Process the received message
+                        debug!("Received message: {:?}", message);
+
+                        match message {
+                            ProtoMessage::ListEntitiesRequest(list_entities_request) => {
+                                debug!("ListEntitiesRequest: {:?}", list_entities_request);
+
+                                for sensor  in &entities {
+                                    tx_clone.send(sensor.clone()).unwrap();
+                                }
+                                tx_clone.send(ProtoMessage::ListEntitiesDoneResponse(
+                                    ListEntitiesDoneResponse {},
+                                ))
+                                .unwrap();
+                            }
+                            _ => {}
+                        }
+                    }
+                });
+
+                let message = ProtoMessage::SensorStateResponse(SensorStateResponse {
+                    key: 0,
+                    state: 25.0,
+                    missing_state: false,
+                });
+                for n in 1..=10 {
+                    sleep(Duration::from_secs(3)).await;
+                    debug!("Sending message number {}", n);
+                    tx.send(message.clone()).expect("Failed to send message");
+                }
+
 
                 // Wait indefinitely for the interrupts
                 let future = future::pending();
                 let () = future.await;
-
-                let message = ProtoMessage::SensorStateResponse(
-                    SensorStateResponse {
-                        key: 0,
-                        state: 25.0,
-                        missing_state: false,
-                    },
-                );
-                tx.send(message.clone()).expect("Failed to send message");
-
             });
         }
     };

@@ -1,4 +1,3 @@
-
 use crate::parser;
 pub use crate::parser::ProtoMessage;
 use byteorder::BigEndian;
@@ -31,15 +30,12 @@ pub fn message_to_packet(message: &ProtoMessage, cipher_encrypt: &mut CipherStat
     Ok(cipher_encrypt.encrypt_vec(&unencrypted_message_frame))
 }
 
-
+#[cfg(feature = "std")]
 #[cfg(test)]
 mod tests {
-    use base64::prelude::*;
-    use log::info;
-    use noise_protocol::{patterns::{HandshakePattern, Token}, HandshakeState};
     use test_log::test;
 
-    use crate::{proto, to_unencrypted_frame};
+    use crate::proto;
 
     use super::*;
 
