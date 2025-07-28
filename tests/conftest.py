@@ -1,6 +1,7 @@
 import asyncio
 from asyncio.subprocess import Process
 import os
+from pathlib import Path
 import socket
 from typing import Optional
 
@@ -26,7 +27,7 @@ class EspHomeTestServer:
         self.process = await asyncio.create_subprocess_shell(
             f"cargo run --example {self.name}",
             env=my_env,
-            cwd=os.path.join(os.getcwd(), ".."),
+            cwd=os.path.join(Path(__file__).parent, ".."),
         )
 
         self._stdout_task = asyncio.create_task(self._read_stdout())

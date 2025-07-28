@@ -54,12 +54,10 @@ pub(crate) enum EncryptionState {
 // ))]
 pub struct EspHomeApi {
     // Private fields
-    #[builder(default=HashMap::new(), setter(skip))]
-    pub(crate) components_by_key: HashMap<u32, ProtoMessage>,
-    #[builder(default=HashMap::new(), setter(skip))]
-    pub(crate) components_key_id: HashMap<String, u32>,
-    #[builder(default = 0, setter(skip))]
-    pub(crate) current_key: u32,
+    #[builder(via_mutators, default=Arc::new(AtomicBool::new(false)))]
+    pub(crate) password_authenticated: Arc<AtomicBool>,
+    #[builder(via_mutators, default=Arc::new(AtomicBool::new(false)))]
+    pub(crate) key_authenticated: Arc<AtomicBool>,
 
     #[builder(via_mutators, default=Arc::new(AtomicBool::new(false)))]
     pub(crate) encrypted_api: Arc<AtomicBool>,
@@ -132,25 +130,31 @@ pub struct EspHomeApi {
 
 /// Handles the EspHome Api, with encryption etc.
 impl EspHomeApi {
-
     /// Starts the server and returns a broadcast channel for messages, and a
     /// broadcast receiver for all messages not handled by the abstraction
     pub async fn start(
         &mut self,
         tcp_stream: TcpStream,
-    ) -> Result<(broadcast::Sender<ProtoMessage>, broadcast::Receiver<ProtoMessage>), Box<dyn std::error::Error>> {
+    ) -> Result<
+        (
+            broadcast::Sender<ProtoMessage>,
+            broadcast::Receiver<ProtoMessage>,
+        ),
+        Box<dyn std::error::Error>,
+    > {
         // Channel for direct answers (prioritized when sending)
         let (answer_messages_tx, mut answer_messages_rx) = broadcast::channel::<ProtoMessage>(16);
         // Channel for normal messages (e.g. state updates)
         let (messages_tx, mut messages_rx) = broadcast::channel::<ProtoMessage>(16);
-        let (outgoing_messages_tx, mut outgoing_messages_rx) = broadcast::channel::<ProtoMessage>(16);
+        let (outgoing_messages_tx, mut outgoing_messages_rx) =
+            broadcast::channel::<ProtoMessage>(16);
 
         // Asynchronously wait for an inbound socket.
         let (mut read, mut write) = tcp_stream.into_split();
 
         let device_info = DeviceInfoResponse {
-            api_encryption_supported: false,
-            uses_password: false,
+            api_encryption_supported: self.encryption_key.is_some(),
+            uses_password: self.password.is_some(),
             name: self.name.clone(),
             mac_address: self.mac.clone().unwrap_or_default(),
             esphome_version: self.esphome_version.clone(),
@@ -178,7 +182,6 @@ impl EspHomeApi {
             name: self.name.clone(),
         };
         let password_clone = self.password.clone();
-        let api_components_clone = self.components_by_key.clone();
         let encrypted_api = self.encrypted_api.clone();
         let encrypt_cypher_clone = self.encrypt_cypher.clone();
         let decrypt_cypher_clone = self.decrypt_cypher.clone();
@@ -196,6 +199,7 @@ impl EspHomeApi {
                 }
             };
         });
+
         // Write Loop
         tokio::spawn(async move {
             let mut disconnect = false;
@@ -203,7 +207,7 @@ impl EspHomeApi {
                 let mut answer_buf: Vec<u8> = vec![];
                 let answer_message: ProtoMessage;
                 // Wait for any new message
-                tokio::select! {                    
+                tokio::select! {
                     message = answer_messages_rx.recv() => {
                         answer_message = message.unwrap();
                     }
@@ -327,7 +331,7 @@ impl EspHomeApi {
                 }
 
                 trace!("TCP Send: {:02X?}", &answer_buf);
-                
+
                 match write.write_all(&answer_buf).await {
                     Err(err) => {
                         error!("Failed to write data to socket: {:?}", err)
@@ -347,12 +351,14 @@ impl EspHomeApi {
 
         // Clone all necessary data before spawning the task
         let answer_messages_tx_clone = answer_messages_tx.clone();
-        let api_components_clone = api_components_clone.clone();
         let handshake_state_clone = self.handshake_state.clone();
         let encryption_state = self.encryption_state.clone();
         let encryption_key = self.encryption_key.clone();
         let encrypted_api = self.encrypted_api.clone();
         let decrypt_cypher_clone = self.decrypt_cypher.clone();
+        let password_authenticated = self.password_authenticated.clone();
+        let key_authenticated = self.key_authenticated.clone();
+
         // Read Loop
         tokio::spawn(async move {
             let mut buf = vec![0; 1024];
@@ -383,18 +389,18 @@ impl EspHomeApi {
                     match preamble {
                         0 => {
                             // Cleartext
-                            
+
                             // TODO: use dynamic length bits
                             let len = buf[cursor + 1] as usize;
                             message = cleartext_frame_to_message(
                                 &buf[cursor + 2..cursor + 3 + len].to_vec(),
                             )
                             .unwrap();
-                        cursor += 3 + len;
+                            cursor += 3 + len;
                         }
                         1 => {
                             // Encrypted
-                            
+
                             let mut encryption_state_changer = encryption_state.lock().await;
                             match *encryption_state_changer {
                                 EncryptionState::Uninitialized => {
@@ -443,14 +449,24 @@ impl EspHomeApi {
                                     let len = BigEndian::read_u16(&buf[cursor + 1..3]) as usize;
                                     let decrypted_message = &buf[3..len + 3];
                                     {
-                                        let mut decrypt_cipher_changer = decrypt_cypher_clone.lock().await;
-                                        message = packet_encrypted::packet_to_message(decrypted_message, &mut *decrypt_cipher_changer.as_mut().unwrap()).unwrap();
+                                        let mut decrypt_cipher_changer =
+                                            decrypt_cypher_clone.lock().await;
+                                        message = packet_encrypted::packet_to_message(
+                                            decrypted_message,
+                                            &mut *decrypt_cipher_changer.as_mut().unwrap(),
+                                        )
+                                        .unwrap();
                                     }
-                                    cursor += 3 + len + 3;
+                                    key_authenticated
+                                        .store(true, std::sync::atomic::Ordering::Relaxed);
 
+                                    cursor += 3 + len + 3;
                                 }
                                 _ => {
-                                    debug!("Wrong encryption state: {:?}", *encryption_state_changer);
+                                    debug!(
+                                        "Wrong encryption state: {:?}",
+                                        *encryption_state_changer
+                                    );
                                     return;
                                 }
                             }
@@ -461,42 +477,40 @@ impl EspHomeApi {
                         }
                     }
 
-                    match message {
+                    // Initialization Messages (unauthenticated)
+                    match &message {
                         ProtoMessage::HelloRequest(hello_request) => {
                             debug!("HelloRequest: {:?}", hello_request);
 
                             answer_messages_tx_clone
                                 .send(ProtoMessage::HelloResponse(hello_response.clone()))
                                 .unwrap();
-                        }
-                        ProtoMessage::DeviceInfoRequest(device_info_request) => {
-                            debug!("DeviceInfoRequest: {:?}", device_info_request);
-                            answer_messages_tx_clone
-                                .send(ProtoMessage::DeviceInfoResponse(device_info.clone()))
-                                .unwrap();
+                            continue;
                         }
                         ProtoMessage::ConnectRequest(connect_request) => {
-                            debug!("ConnectRequest: {:?}", connect_request);
-                            let mut invalid = true;
-                            if let Some(password) = password_clone.clone() {
-                                invalid = !constant_time_eq(
-                                    connect_request.password.as_bytes(),
-                                    password.as_bytes(),
-                                );
-                                trace!("Password set, check: {}", invalid);
-                            } else {
-                                trace!("No password set, accepting all connections");
-                                invalid = false;
+                            if encryption_key.is_none() {
+                                debug!("ConnectRequest: {:?}", connect_request);
+                                let valid;
+                                if let Some(password) = password_clone.clone() {
+                                    valid = constant_time_eq(
+                                        connect_request.password.as_bytes(),
+                                        password.as_bytes(),
+                                    );
+                                } else {
+                                    valid = true;
+                                }
+
+                                password_authenticated
+                                    .store(valid, std::sync::atomic::Ordering::Relaxed);
+                                let response_message = ConnectResponse {
+                                    invalid_password: !valid,
+                                };
+                                debug!("ConnectResponse: {:?}", response_message);
+                                answer_messages_tx_clone
+                                    .send(ProtoMessage::ConnectResponse(response_message))
+                                    .unwrap();
+                                continue;
                             }
-
-
-                            // TODO: Also set an authorized variable bool
-                            let response_message = ConnectResponse {
-                                invalid_password: invalid,
-                            };
-                            answer_messages_tx_clone
-                                .send(ProtoMessage::ConnectResponse(response_message))
-                                .unwrap();
                         }
 
                         ProtoMessage::DisconnectRequest(disconnect_request) => {
@@ -505,8 +519,23 @@ impl EspHomeApi {
                             answer_messages_tx_clone
                                 .send(ProtoMessage::DisconnectResponse(response_message))
                                 .unwrap();
+                            continue;
                         }
+                        _ => {}
+                    }
+                    let auth_test = key_authenticated.load(std::sync::atomic::Ordering::Relaxed)
+                        || password_authenticated.load(std::sync::atomic::Ordering::Relaxed);
+                    info!("Authenticated: {}", auth_test);
 
+                    if !auth_test {
+                        answer_messages_tx_clone
+                            .send(ProtoMessage::DisconnectResponse(DisconnectResponse {}))
+                            .unwrap();
+                        continue;
+                    }
+
+                    // Authenticated Messages
+                    match &message {
                         ProtoMessage::PingRequest(ping_request) => {
                             debug!("PingRequest: {:?}", ping_request);
                             let response_message = PingResponse {};
@@ -514,9 +543,15 @@ impl EspHomeApi {
                                 .send(ProtoMessage::PingResponse(response_message))
                                 .unwrap();
                         }
+                        ProtoMessage::DeviceInfoRequest(device_info_request) => {
+                            debug!("DeviceInfoRequest: {:?}", device_info_request);
+                            answer_messages_tx_clone
+                                .send(ProtoMessage::DeviceInfoResponse(device_info.clone()))
+                                .unwrap();
+                        }
 
                         message => {
-                            outgoing_messages_tx.send(message);
+                            outgoing_messages_tx.send(message.clone()).unwrap();
                         }
                     }
                 }

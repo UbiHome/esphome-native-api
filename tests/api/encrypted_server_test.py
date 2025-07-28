@@ -1,6 +1,7 @@
 from asyncio import sleep
 from unittest.mock import Mock
 import aioesphomeapi
+import pytest
 
 from tests.conftest import EspHomeTestServer
 
@@ -105,3 +106,31 @@ async def test_encrypted_server(encrypted_server: EspHomeTestServer):
     mock.reset_mock()
 
     await api.disconnect()
+
+
+async def test_do_not_allow_unauthenticated(encrypted_server: EspHomeTestServer):
+    """An encrypted server should not allow unauthenticated access"""
+
+    api = aioesphomeapi.APIClient(
+        "127.0.0.1",
+        encrypted_server.port,
+        "password"
+    )
+    await api.connect(login=False)
+
+    # Test Closes connection as unauthorized request
+    with pytest.raises(aioesphomeapi.core.SocketClosedAPIError):
+        await api.device_info()
+
+async def test_do_not_allow_password_authentication(encrypted_server: EspHomeTestServer):
+    """An encrypted server should not allow password authentication"""
+
+    api = aioesphomeapi.APIClient(
+        "127.0.0.1",
+        encrypted_server.port,
+        "password"
+    )
+
+    # Test Closes connection as unauthorized request
+    with pytest.raises(aioesphomeapi.core.SocketClosedAPIError):
+        await api.connect(login=True)
