@@ -41,32 +41,18 @@ pub(crate) enum EncryptionState {
 }
 
 #[derive(TypedBuilder)]
-// #[builder(mutators(
-//     // Mutator has access to `x` additionally.
-//     #[mutator(requires = [noise_psk, encryption_key])]
-//     fn decode_encryption_key(&mut self) {
-//         trace!("Decoding encryption key: {:?}", self.encryption_key);
-//         if self.encryption_key.is_none() {
-//             return;
-//         }
-
-//     }
-// ))]
 pub struct EspHomeApi {
     // Private fields
-    #[builder(via_mutators, default=Arc::new(AtomicBool::new(false)))]
+    #[builder(default=Arc::new(AtomicBool::new(false)))]
     pub(crate) password_authenticated: Arc<AtomicBool>,
-    #[builder(via_mutators, default=Arc::new(AtomicBool::new(false)))]
+    #[builder(default=Arc::new(AtomicBool::new(false)))]
     pub(crate) key_authenticated: Arc<AtomicBool>,
 
-    #[builder(via_mutators, default=Arc::new(AtomicBool::new(false)))]
+    #[builder(default=Arc::new(AtomicBool::new(false)))]
     pub(crate) encrypted_api: Arc<AtomicBool>,
 
     #[builder(default=Arc::new(Mutex::new(EncryptionState::Uninitialized)))]
     pub(crate) encryption_state: Arc<Mutex<EncryptionState>>,
-
-    #[builder(via_mutators)]
-    pub(crate) noise_psk: Vec<u8>,
 
     #[builder(default=Arc::new(Mutex::new(None)), setter(skip))]
     pub(crate) handshake_state:
@@ -142,6 +128,12 @@ impl EspHomeApi {
         ),
         Box<dyn std::error::Error>,
     > {
+        if self.password.is_none() && self.encryption_key.is_none() {
+            self.password_authenticated
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+
+
         // Channel for direct answers (prioritized when sending)
         let (answer_messages_tx, mut answer_messages_rx) = broadcast::channel::<ProtoMessage>(16);
         // Channel for normal messages (e.g. state updates)
@@ -490,14 +482,12 @@ impl EspHomeApi {
                         ProtoMessage::ConnectRequest(connect_request) => {
                             if encryption_key.is_none() {
                                 debug!("ConnectRequest: {:?}", connect_request);
-                                let valid;
+                                let mut valid = false;
                                 if let Some(password) = password_clone.clone() {
                                     valid = constant_time_eq(
                                         connect_request.password.as_bytes(),
                                         password.as_bytes(),
                                     );
-                                } else {
-                                    valid = true;
                                 }
 
                                 password_authenticated
