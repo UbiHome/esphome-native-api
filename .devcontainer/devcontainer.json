@@ -13,14 +13,15 @@
 		"extensions": [
 			"ms-azuretools.vscode-docker",
 			"github.vscode-github-actions",
-			"streetsidesoftware.code-spell-checker"
+			"streetsidesoftware.code-spell-checker",
+			"ms-python.python"
 		]
 		},
 		"settings": {
 		"terminal.integrated.shell.linux": "/bin/bash"
 		}
 	},
-	"postCreateCommand": "sudo apt-get update && apt-get install protobuf-compiler -y && rustup component add rustfmt clippy && cargo build",
+	"postCreateCommand": "sudo apt-get update && sudo apt-get install protobuf-compiler -y && rustup component add rustfmt clippy && cargo build && curl -LsSf https://astral.sh/uv/install.sh | sh",
 	"features": {
 			"ghcr.io/devcontainers/features/rust:1": {}
 	}
