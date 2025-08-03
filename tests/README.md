@@ -3,18 +3,14 @@
 ## Installation
 
 ```
-pipx install poetry
+uv sync
 ```
 
 ## Development
 
 ```bash
 cd tests
-# Windows
-.\.venv\Scripts\activate.ps1
-# Linux:
-eval $(poetry env activate)
-pytest
+uv run pytest
 ```
 
 ## If something is not working
