@@ -62,7 +62,10 @@ class EspHomeTestServer:
         if self.process:
 
             # Try to terminate gracefully
-            self.process.terminate()
+            try:
+                self.process.terminate()
+            except ProcessLookupError:
+                pass
             try:
                 print("waiting...")
                 await asyncio.wait_for(self.process.wait(), timeout=5)
