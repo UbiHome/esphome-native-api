@@ -28,13 +28,14 @@ class EspHomeTestServer:
         executable = os.path.join(Path(__file__).parent, "..", f"target/debug/examples/{self.name}")
         if os.path.exists(executable) and os.environ.get("CI"):
             # Use pre-build binaries
-            self.process = await asyncio.create_subprocess_shell(
+            self.process = await asyncio.create_subprocess_exec(
                 executable,
                 env=my_env,
             )
         else:
-            self.process = await asyncio.create_subprocess_shell(
-                f"cargo run --example {self.name}",
+            # raise Exception(executable)
+            self.process = await asyncio.create_subprocess_exec(
+                "cargo", "run", "--example", self.name,
                 env=my_env,
                 cwd=os.path.join(Path(__file__).parent, ".."),
             )
@@ -115,21 +116,21 @@ class EspHomeTestServer:
             print(f"[SERVER] {message}")
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 async def test_server():
     """Fixture to run the test server."""
     async with EspHomeTestServer() as s:
         yield s
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 async def encrypted_server():
     """Fixture to run the test encrypted_server."""
     async with EspHomeTestServer("encrypted_server", port=7001) as s:
         yield s
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 async def password_server():
     """Fixture to run the test password_server."""
     async with EspHomeTestServer("password_server", port=7002) as s:

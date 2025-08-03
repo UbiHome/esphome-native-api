@@ -143,4 +143,37 @@ jobs:
           cargo build --examples
           cd tests
           uv run pytest
+          uv tool install tox --with tox-uv
+          tox
 
+
+
+
+  #     - name: Upload example binaries
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: example_binaries
+  #         path: todo
+
+  # e2e_test_matrix:
+  #   name: E2E Test Matrix
+  #   needs: e2e_test
+  #   runs-on: ubuntu-24.04
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+
+  #     - name: Download proto source files
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: proto_src_files
+  #         path: src/proto
+
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: 3.12
+
+  #     - name: Run tests
+  #       run: |-
+  #         cd tests
+  #         uv run pytest
