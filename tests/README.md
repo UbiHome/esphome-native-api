@@ -20,7 +20,12 @@ uv run pytest
 Get-NetTCPConnection | Where-Object { $_.LocalPort -eq 6053 }
 
 # Linux:
-ps saux | grep ubihome
+ps aux | grep ubihome
 pkill -8  ubihome
+
+ps aux | grep _server
+pkill -8 encrypted_server
+pkill -8 test_server
+pkill -8 password_server
 ```
 

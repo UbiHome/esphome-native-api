@@ -24,11 +24,20 @@ class EspHomeTestServer:
         my_env = os.environ.copy()
         my_env["RUST_LOG"] = "debug"
         my_env["RUSTFLAGS"] = "-Awarnings"
-        self.process = await asyncio.create_subprocess_shell(
-            f"cargo run --example {self.name}",
-            env=my_env,
-            cwd=os.path.join(Path(__file__).parent, ".."),
-        )
+
+        executable = os.path.join(Path(__file__).parent, "..", f"target/debug/examples/{self.name}")
+        if os.path.exists(executable) and os.environ.get("CI"):
+            # Use pre-build binaries
+            self.process = await asyncio.create_subprocess_shell(
+                executable,
+                env=my_env,
+            )
+        else:
+            self.process = await asyncio.create_subprocess_shell(
+                f"cargo run --example {self.name}",
+                env=my_env,
+                cwd=os.path.join(Path(__file__).parent, ".."),
+            )
 
         self._stdout_task = asyncio.create_task(self._read_stdout())
         self._stderr_task = asyncio.create_task(self._read_stderr())
