@@ -8,7 +8,6 @@ use noise_rust_crypto::ChaCha20Poly1305;
 
 
 pub fn packet_to_message(buffer: &[u8], cipher_decrypt: &mut CipherState<ChaCha20Poly1305>) -> Result<ProtoMessage, Box<dyn std::error::Error>> {
-    // trace!("Decrypt: N: {:?}", cipher_decrypt.get_next_n());
     let decrypted_message_frame = cipher_decrypt.decrypt_vec(&buffer).unwrap(); // "Error during decryption".to_string()
 
     let message_type = BigEndian::read_u16(&decrypted_message_frame[0..2]) as usize;
