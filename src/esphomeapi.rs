@@ -1,3 +1,4 @@
+use crate::frame::construct_frame;
 use crate::frame::to_encrypted_frame;
 use crate::frame::to_unencrypted_frame;
 use crate::packet_encrypted;
@@ -16,7 +17,9 @@ use log::debug;
 use log::error;
 use log::info;
 use log::trace;
+use log::warn;
 use noise_protocol::CipherState;
+use noise_protocol::ErrorKind;
 use noise_protocol::HandshakeState;
 use noise_protocol::patterns::noise_nn_psk0;
 use noise_rust_crypto::ChaCha20Poly1305;
@@ -38,6 +41,7 @@ pub(crate) enum EncryptionState {
     ServerHello,
     ServerHandshake,
     Initialized,
+    Failure,
 }
 
 #[derive(TypedBuilder)]
@@ -133,7 +137,6 @@ impl EspHomeApi {
                 .store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-
         // Channel for direct answers (prioritized when sending)
         let (answer_messages_tx, mut answer_messages_rx) = broadcast::channel::<ProtoMessage>(16);
         // Channel for normal messages (e.g. state updates)
@@ -166,6 +169,12 @@ impl EspHomeApi {
             suggested_area: self.suggested_area.clone().unwrap_or_default(),
             bluetooth_mac_address: self.bluetooth_mac_address.clone().unwrap_or_default(),
         };
+
+        if self.encryption_key.is_some() {
+            debug!("Encryption enabled");
+            self.encrypted_api
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
 
         let hello_response = HelloResponse {
             api_version_major: self.api_version_major,
@@ -200,6 +209,7 @@ impl EspHomeApi {
                 let answer_message: ProtoMessage;
                 // Wait for any new message
                 tokio::select! {
+                    biased; // Poll answer_messages_rx first
                     message = answer_messages_rx.recv() => {
                         answer_message = message.unwrap();
                     }
@@ -248,10 +258,11 @@ impl EspHomeApi {
                         match *encryption_state_changer {
                             EncryptionState::ServerHello => {
                                 let out: Vec<u8>;
-                                {
-                                    let mut handshake_state_change =
-                                        handshake_state_clone.lock().await;
+                                let mut handshake_state_change = handshake_state_clone.lock().await;
 
+                                if handshake_state_change.is_none() {
+                                    *encryption_state_changer = EncryptionState::Failure;
+                                } else {
                                     let handshake_state =
                                         (*handshake_state_change).as_mut().unwrap();
 
@@ -266,26 +277,26 @@ impl EspHomeApi {
                                         *encrypt_cipher_changer = Some(encrypt_cipher);
                                         *decrypt_cipher_changer = Some(decrypt_cipher);
                                     }
+
+                                    let mut message_handshake = vec![0];
+                                    message_handshake.extend(out);
+
+                                    let len_u16 = message_handshake.len() as u16;
+                                    let len_bytes = len_u16.to_be_bytes();
+                                    let length: Vec<u8> = vec![len_bytes[0], len_bytes[1]];
+
+                                    let mut encrypted_frame = vec![1];
+                                    encrypted_frame.extend(length);
+                                    encrypted_frame.extend(message_handshake);
+
+                                    debug!("Sending handshake: {:?}", &encrypted_frame);
+                                    write
+                                        .write_all(&encrypted_frame)
+                                        .await
+                                        .expect("failed to write encrypted response");
+
+                                    *encryption_state_changer = EncryptionState::ServerHandshake;
                                 }
-
-                                let mut message_handshake = vec![0];
-                                message_handshake.extend(out);
-
-                                let len_u16 = message_handshake.len() as u16;
-                                let len_bytes = len_u16.to_be_bytes();
-                                let length: Vec<u8> = vec![len_bytes[0], len_bytes[1]];
-
-                                let mut encrypted_frame = vec![1];
-                                encrypted_frame.extend(length);
-                                encrypted_frame.extend(message_handshake);
-
-                                debug!("Sending handshake: {:?}", &encrypted_frame);
-                                write
-                                    .write_all(&encrypted_frame)
-                                    .await
-                                    .expect("failed to write encrypted response");
-
-                                *encryption_state_changer = EncryptionState::ServerHandshake;
                             }
                             _ => {}
                         }
@@ -305,6 +316,24 @@ impl EspHomeApi {
                                 }
 
                                 *encryption_state_changer = EncryptionState::Initialized;
+                            }
+                            _ => {
+                                let packet =
+                                    [[1].to_vec(), "Only key encryption is enabled".as_bytes().to_vec()]
+                                        .concat();
+                                answer_buf = construct_frame(&packet, true).unwrap();
+                                disconnect = true;
+                            }
+                        }
+                        match *encryption_state_changer {
+                            EncryptionState::Failure => {
+                                error!("Encrypted API Failure. Disconnecting.");
+                                let packet =
+                                    [[1].to_vec(), "Handshake MAC failure".as_bytes().to_vec()]
+                                        .concat();
+                                answer_buf = construct_frame(&packet, true).unwrap();
+                                disconnect = true;
+                                // answer_buf = [answer_buf, failure_buffer].concat();
                             }
                             _ => {}
                         }
@@ -408,7 +437,7 @@ impl EspHomeApi {
                                         false,
                                         // NEXT: This is somehow set from the first api message?
                                         b"NoiseAPIInit\0\0",
-                                        None, // No static private key
+                                        None,
                                         None,
                                         None,
                                         None,
@@ -420,19 +449,41 @@ impl EspHomeApi {
                                         .unwrap();
 
                                     handshake_state.push_psk(&noise_psk);
-                                    handshake_state
-                                        .read_message_vec(&buf[3 + 3 + 1..n])
-                                        .expect("Failed to read message");
+                                    match handshake_state.read_message_vec(&buf[3 + 3 + 1..n]) {
+                                        Ok(_) => {
+                                            {
+                                                let mut mutex_changer =
+                                                    handshake_state_clone.lock().await;
+                                                *mutex_changer = Option::Some(handshake_state);
+                                            }
 
-                                    {
-                                        let mut mutex_changer = handshake_state_clone.lock().await;
-                                        *mutex_changer = Option::Some(handshake_state);
+                                            answer_messages_tx_clone
+                                                .send(ProtoMessage::HelloResponse(
+                                                    hello_response.clone(),
+                                                ))
+                                                .unwrap();
+                                            *encryption_state_changer =
+                                                EncryptionState::ClientHandshake;
+                                        }
+                                        Err(e) => {
+                                            match e.kind() {
+                                                // Only warn here. The error will be handled in the send loop
+                                                ErrorKind::Decryption => {
+                                                    warn!("Decryption failed: {}", e);
+                                                }
+                                                _ => {
+                                                    debug!("Failed to read message: {}", e);
+                                                }
+                                            }
+                                            answer_messages_tx_clone
+                                                .send(ProtoMessage::HelloResponse(
+                                                    hello_response.clone(),
+                                                ))
+                                                .unwrap();
+                                            *encryption_state_changer =
+                                                EncryptionState::ClientHandshake;
+                                        }
                                     }
-
-                                    answer_messages_tx_clone
-                                        .send(ProtoMessage::HelloResponse(hello_response.clone()))
-                                        .unwrap();
-                                    *encryption_state_changer = EncryptionState::ClientHandshake;
 
                                     cursor += n;
                                     continue;

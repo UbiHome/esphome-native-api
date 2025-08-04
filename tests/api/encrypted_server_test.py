@@ -111,11 +111,19 @@ async def test_do_not_allow_unauthenticated(encrypted_server: EspHomeTestServer)
         encrypted_server.port,
         "password"
     )
-    await api.connect(login=False)
 
-    # Test Closes connection as unauthorized request
-    with pytest.raises(aioesphomeapi.core.SocketClosedAPIError):
-        await api.device_info()
+    with pytest.raises(aioesphomeapi.core.RequiresEncryptionAPIError):
+        await api.connect(login=False)
+
+
+async def test_require_encryption_error(encrypted_server: EspHomeTestServer):
+    """An encrypted server should not allow unauthenticated access"""
+
+    api = aioesphomeapi.APIClient("127.0.0.1", encrypted_server.port, None)
+    
+    with pytest.raises(aioesphomeapi.core.RequiresEncryptionAPIError):
+        await api.connect(login=False)
+
 
 async def test_do_not_allow_password_authentication(encrypted_server: EspHomeTestServer):
     """An encrypted server should not allow password authentication"""
@@ -127,5 +135,34 @@ async def test_do_not_allow_password_authentication(encrypted_server: EspHomeTes
     )
 
     # Test Closes connection as unauthorized request
-    with pytest.raises(aioesphomeapi.core.SocketClosedAPIError):
+    with pytest.raises(aioesphomeapi.core.RequiresEncryptionAPIError):
         await api.connect(login=True)
+
+
+async def test_do_not_allow_wrong_key(encrypted_server: EspHomeTestServer):
+    api = aioesphomeapi.APIClient(
+        "127.0.0.1",
+        encrypted_server.port,
+        None,
+        noise_psk="RcaiIwmN008EoAE7KkN2qCXic+hm540EhLvD30EnhhE=",
+    )
+    with pytest.raises(aioesphomeapi.core.InvalidEncryptionKeyAPIError):
+        await api.connect(login=False)
+
+
+@pytest.mark.skip("TODO: Needs to be fixed in rust")
+async def test_encrypted_server_with_login(encrypted_server: EspHomeTestServer):
+    """test encrypted server"""
+
+    api = aioesphomeapi.APIClient(
+        "127.0.0.1",
+        encrypted_server.port,
+        None,
+        noise_psk=encrypted_server.noise_psk,
+    )
+    await api.connect(login=True)
+
+    # Test API Hello
+    assert api.api_version.major == 1
+    assert api.api_version.minor == 42
+    assert api.log_name == "test_device @ 127.0.0.1"

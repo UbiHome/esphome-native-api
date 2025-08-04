@@ -1,6 +1,7 @@
 # General
 
-The messaging protocol is based on protobuf messages, with
+The messaging protocol is based on protobuf messages. 
+There is no signaling for switching between encrypted and unencrypted communication.
 
 ## Frame Format [^1]
 
@@ -66,6 +67,22 @@ sequenceDiagram
 
     Client->>Api: DisconnectRequest
     Api->>Client: DisconnectResponse
+
+```
+
+
+
+
+## Unencrypted to Encrypted Handover
+
+```mermaid
+sequenceDiagram
+    Client->>Api: HelloRequest (unencrypted)
+    Api->>Client: DisconnectResponse (encrypted)
+
+    Client->>Api: HelloRequest (encrypted)
+    Api->>Client: HelloResponse (encrypted)
+    %% ...
 
 ```
 

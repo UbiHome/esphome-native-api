@@ -12,7 +12,7 @@ use esphome_native_api::esphomeapi::EspHomeApi;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     pretty_env_logger::formatted_builder().filter_level(LevelFilter::Trace).init();
 
-    let addr: SocketAddr = SocketAddr::from(([127, 0, 0, 1], 7001));
+    let addr: SocketAddr = SocketAddr::from(([0, 0, 0, 0], 7001));
     let socket = TcpSocket::new_v4().unwrap();
     socket.set_reuseaddr(true).unwrap();
 
