@@ -419,6 +419,8 @@ impl EspHomeApi {
                                 &buf[cursor + 2..cursor + 3 + len].to_vec(),
                             )
                             .unwrap();
+                            cursor += 3 + len;
+
 
                             match &message {
                                 ProtoMessage::HelloRequest(hello_request) => {
@@ -427,11 +429,11 @@ impl EspHomeApi {
                                     answer_messages_tx_clone
                                         .send(ProtoMessage::HelloResponse(hello_response.clone()))
                                         .unwrap();
+                                    continue;
                                 }
                                 _ => {}
                             }
 
-                            cursor += 3 + len;
                         }
                         1 => {
                             // Encrypted
@@ -633,6 +635,6 @@ pub fn cleartext_frame_to_message(
     let message_type = buffer[0] as usize;
     let packet_content = &buffer[1..];
     debug!("Message type: {}", message_type);
-    debug!("Message: {:?}", packet_content);
+    debug!("Message: {:02X?}", packet_content);
     Ok(parser::parse_proto_message(message_type, &packet_content).unwrap())
 }
