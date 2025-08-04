@@ -1,6 +1,8 @@
 from asyncio import sleep
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 import aioesphomeapi
+from aioesphomeapi.reconnect_logic import ReconnectLogic, ReconnectLogicState
+
 import pytest
 
 from tests.conftest import EspHomeTestServer
@@ -234,3 +236,77 @@ async def test_encrypted_server_reconnect(encrypted_server: EspHomeTestServer):
     assert device_info.suggested_area == "Test Area"
 
     await api.disconnect()
+
+
+async def test_encrypted_server_parallel(encrypted_server: EspHomeTestServer):
+    """test encrypted server"""
+
+    api1 = aioesphomeapi.APIClient(
+        "127.0.0.1",
+        encrypted_server.port,
+        None,
+        noise_psk=encrypted_server.noise_psk,
+    )
+
+    api2 = aioesphomeapi.APIClient(
+        "127.0.0.1",
+        encrypted_server.port,
+        None,
+        noise_psk=encrypted_server.noise_psk,
+    )
+
+    await api1.connect()
+    await api2.connect()
+
+    # Test API1 Hello
+    assert api1.api_version.major == 1
+    assert api1.api_version.minor == 42
+    assert api1.log_name == "test_device @ 127.0.0.1"
+
+    # Test API2 Hello
+    assert api2.api_version.major == 1
+    assert api2.api_version.minor == 42
+    assert api2.log_name == "test_device @ 127.0.0.1"
+
+    # Test Device Details
+    device_info = await api1.device_info()
+    device_info = await api2.device_info()
+
+    assert device_info.name == "test_device"
+    assert device_info.friendly_name == "friendly_test_device"
+    assert device_info.bluetooth_mac_address == "B0:00:00:00:00:00"
+    assert device_info.mac_address == "00:00:00:00:00:01"
+    assert device_info.manufacturer == "Test Inc."
+    assert device_info.model == "Test Model"
+    assert device_info.suggested_area == "Test Area"
+
+    await api1.disconnect()
+    await api2.disconnect()
+
+@pytest.mark.skip("Working but not sure if it tests what it should be")
+async def test_encrypted_server_reconnect_logic(encrypted_server: EspHomeTestServer):
+    """test encrypted server"""
+
+    api = aioesphomeapi.APIClient(
+        "127.0.0.1",
+        encrypted_server.port,
+        None,
+        noise_psk=encrypted_server.noise_psk,
+    )
+
+    await api.connect()
+    await api.disconnect()
+
+    rl = ReconnectLogic(
+        client=api,
+        on_disconnect=AsyncMock(),
+        on_connect=AsyncMock(),
+        zeroconf_instance=None,
+        name="test_device",
+    )
+    assert rl._connection_state is ReconnectLogicState.DISCONNECTED
+    await rl.start()
+    await sleep(0)
+    await sleep(1)
+    await api.disconnect()
+    await sleep(10)
