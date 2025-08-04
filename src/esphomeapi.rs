@@ -376,7 +376,8 @@ impl EspHomeApi {
 
                 match write.write_all(&answer_buf).await {
                     Err(err) => {
-                        error!("Failed to write data to socket: {:?}", err)
+                        error!("Failed to write data to socket: {:?}", err);
+                        break;
                     }
                     _ => {}
                 }
@@ -489,14 +490,6 @@ impl EspHomeApi {
                                                     handshake_state_clone.lock().await;
                                                 *mutex_changer = Option::Some(handshake_state);
                                             }
-
-                                            answer_messages_tx_clone
-                                                .send(ProtoMessage::HelloResponse(
-                                                    hello_response.clone(),
-                                                ))
-                                                .unwrap();
-                                            *encryption_state_changer =
-                                                EncryptionState::ClientHandshake;
                                         }
                                         Err(e) => {
                                             match e.kind() {
@@ -508,16 +501,15 @@ impl EspHomeApi {
                                                     debug!("Failed to read message: {}", e);
                                                 }
                                             }
-                                            answer_messages_tx_clone
-                                                .send(ProtoMessage::HelloResponse(
-                                                    hello_response.clone(),
-                                                ))
-                                                .unwrap();
-                                            *encryption_state_changer =
-                                                EncryptionState::ClientHandshake;
                                         }
                                     }
-
+                                    answer_messages_tx_clone
+                                        .send(ProtoMessage::HelloResponse(
+                                            hello_response.clone(),
+                                        ))
+                                        .unwrap();
+                                    *encryption_state_changer =
+                                        EncryptionState::ClientHandshake;
                                     cursor += n;
                                     continue;
                                 }
@@ -583,7 +575,6 @@ impl EspHomeApi {
                                 .unwrap();
                             continue;
                         }
-
                         ProtoMessage::DisconnectRequest(disconnect_request) => {
                             debug!("DisconnectRequest: {:?}", disconnect_request);
                             let response_message = DisconnectResponse {};
@@ -620,7 +611,8 @@ impl EspHomeApi {
                                 .send(ProtoMessage::DeviceInfoResponse(device_info.clone()))
                                 .unwrap();
                         }
-
+                        // Handled above
+                        ProtoMessage::HelloRequest(_) => {}
                         message => {
                             outgoing_messages_tx.send(message.clone()).unwrap();
                         }

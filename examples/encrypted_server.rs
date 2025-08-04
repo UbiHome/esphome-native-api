@@ -121,15 +121,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let (tx, mut rx) = server.start(stream).await.expect("Failed to start server");
                 let tx_clone = tx.clone();
                 debug!("Server started");
-                sleep(Duration::from_secs(3)).await;
 
                 tokio::spawn(async move {
                     loop {
-                        let message = rx.recv().await.unwrap();
+                        let message = rx.recv().await;
+                        if message.as_ref().is_err() {
+                            info!("Connection closed or error: {:?}", &message);
+                            return;
+                        }
                         // Process the received message
                         debug!("Received message: {:?}", message);
 
-                        match message {
+                        match message.unwrap() {
                             ProtoMessage::ListEntitiesRequest(list_entities_request) => {
                                 debug!("ListEntitiesRequest: {:?}", list_entities_request);
 
