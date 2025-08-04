@@ -207,18 +207,37 @@ impl EspHomeApi {
             loop {
                 let mut answer_buf: Vec<u8> = vec![];
                 let answer_message: ProtoMessage;
-                // Wait for any new message
-                tokio::select! {
-                    biased; // Poll answer_messages_rx first
-                    message = answer_messages_rx.recv() => {
-                        answer_message = message.unwrap();
-                    }
-                    message = messages_rx.recv() => {
-                        answer_message = message.unwrap();
-                    }
-                };
-
                 let encryption = encrypted_api.load(std::sync::atomic::Ordering::Relaxed);
+
+                // If encryption is enabled we have to make sure initialization messages are send before any custom messages
+                let mut initialized = false;
+                {
+                    let mut encryption_state_changer = encryption_state.lock().await;
+                    match *encryption_state_changer {
+                        EncryptionState::Initialized => {
+                            initialized = true;
+                        }
+                        _ => {
+                            initialized = true;
+                        }
+                    }
+                }
+
+                // Wait for any new message
+                if encryption && !initialized {
+                    answer_message = answer_messages_rx.recv().await.unwrap();
+                } else {
+                    tokio::select! {
+                        biased; // Poll answer_messages_rx first
+                        message = answer_messages_rx.recv() => {
+                            answer_message = message.unwrap();
+                        }
+                        message = messages_rx.recv() => {
+                            answer_message = message.unwrap();
+                        }
+                    };
+                }
+
                 if encryption {
                     {
                         let mut encryption_state_changer = encryption_state.lock().await;
@@ -421,7 +440,6 @@ impl EspHomeApi {
                             .unwrap();
                             cursor += 3 + len;
 
-
                             match &message {
                                 ProtoMessage::HelloRequest(hello_request) => {
                                     debug!("HelloRequest: {:?}", hello_request);
@@ -433,7 +451,6 @@ impl EspHomeApi {
                                 }
                                 _ => {}
                             }
-
                         }
                         1 => {
                             // Encrypted
