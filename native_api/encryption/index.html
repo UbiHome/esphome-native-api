@@ -563,6 +563,45 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Initialization of the encryption protocol">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      Errors
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Errors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#client-connects-without-encryption" class="md-nav__link">
+    <span class="md-ellipsis">
+      Client connects without encryption
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#client-connects-with-wrong-encryption-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      Client connects with wrong encryption key
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -613,6 +652,45 @@
       Initialization of the encryption protocol
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Initialization of the encryption protocol">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      Errors
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Errors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#client-connects-without-encryption" class="md-nav__link">
+    <span class="md-ellipsis">
+      Client connects without encryption
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#client-connects-with-wrong-encryption-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      Client connects with wrong encryption key
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -693,14 +771,14 @@ packet-beta
 </table>
 <h2 id="initialization-of-the-encryption-protocol">Initialization of the encryption protocol<a class="headerlink" href="#initialization-of-the-encryption-protocol" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>sequenceDiagram
-    Client-&gt;&gt;Api: HandshakeRequest *Zero Byte encrypted*
-    Api-&gt;&gt;Client: Custom Server Hello
-    Api-&gt;&gt;Client: HandshakeResponse *Zero Byte encrypted*
-    Api-&gt;&gt;Client: Encrypted HelloResponse
+    Client-&gt;&gt;Server: HandshakeRequest *Zero Byte encrypted*
+    Server-&gt;&gt;Client: Custom Server Hello
+    Server-&gt;&gt;Client: HandshakeResponse *Zero Byte encrypted*
+    Server-&gt;&gt;Client: Encrypted HelloResponse
 
     loop Keep Alive Messaging
-        Client-&gt;&gt;Api: PingRequest
-        Api-&gt;&gt;Client: PingResponse
+        Client-&gt;&gt;Server: PingRequest
+        Server-&gt;&gt;Client: PingResponse
     end
 </code></pre>
 <ol>
@@ -717,9 +795,10 @@ config:
 packet-beta
   0-0: "Preamble (0x01)"
   1-2: "Length"
-  3-3: "Encryption Type (0x01 for Noise_NNpsk0_25519_ChaChaPoly_SHA256)"
-  4-5: "Type"
-  6-31: "Protobuf Content"</code></pre>
+  3-7: "Server Name (Variable Length)"
+  8: "Delimiter (0x00)"
+  9-15: "Mac Address (Variable Length)"
+  16: "Delimiter (0x00)"</code></pre>
 <table>
 <thead>
 <tr>
@@ -738,15 +817,33 @@ packet-beta
 </tr>
 <tr>
 <td>Length</td>
-<td>1-5</td>
-<td>Variable Message Length according to <a href="https://protobuf.dev/programming-guides/encoding/">VarInt Specification</a> (encrypted frames ignore the spec and always use 2 bytes)</td>
+<td>1-2</td>
+<td>Length of the Data (an unsigned 16-bit integer in big-endian format)</td>
 <td><code>0x16</code> or <code>0xFFFFFFFFFF</code></td>
 </tr>
 <tr>
-<td>Data</td>
-<td>0-34,359,738,367</td>
-<td><a href="./">Encrypted</a> or <a href="#packet">unencrypted Packet</a></td>
-<td></td>
+<td>Server Name</td>
+<td>3-X</td>
+<td>Name of the Server</td>
+<td><code>test_server</code></td>
+</tr>
+<tr>
+<td>Delimiter</td>
+<td>X + 1</td>
+<td>Zero Byte Delimiter</td>
+<td><code>0x00</code></td>
+</tr>
+<tr>
+<td>Mac Address</td>
+<td>X + 2 - Y</td>
+<td>Mac Address of the Server</td>
+<td><code>00:11:22:33:44:55</code></td>
+</tr>
+<tr>
+<td>Delimiter</td>
+<td>Y + 1</td>
+<td>Zero Byte Delimiter</td>
+<td><code>0x00</code></td>
 </tr>
 </tbody>
 </table>
@@ -758,6 +855,77 @@ packet-beta
 <ul>
 <li>for api encryption the mdns entry needs to be added: <code>"api_encryption=Noise_NNpsk0_25519_ChaChaPoly_SHA256"</code></li>
 </ul>
+<h3 id="errors">Errors<a class="headerlink" href="#errors" title="Permanent link">&para;</a></h3>
+<h4 id="client-connects-without-encryption">Client connects without encryption<a class="headerlink" href="#client-connects-without-encryption" title="Permanent link">&para;</a></h4>
+<pre class="mermaid"><code>sequenceDiagram
+    Client-&gt;&gt;Server: HelloRequest
+    Server-&gt;&gt;Client: HelloResponse (with encryption preamble set)
+
+</code></pre>
+<ol>
+<li>HelloRequest is sent by the client.</li>
+<li>The Server responds with a HelloResponse with the encryption preamble set to <code>0x01</code> (indicating that the server requires encryption).</li>
+<li>Connection is closed by the server.</li>
+</ol>
+<h4 id="client-connects-with-wrong-encryption-key">Client connects with wrong encryption key<a class="headerlink" href="#client-connects-with-wrong-encryption-key" title="Permanent link">&para;</a></h4>
+<pre class="mermaid"><code>sequenceDiagram
+    Client-&gt;&gt;Server: HandshakeRequest *Zero Byte encrypted*
+    Server-&gt;&gt;Client: Custom Server Hello
+    Server-&gt;&gt;Client: HandshakeResponse (with error message)</code></pre>
+<ol>
+<li>HelloRequest is sent by the client.</li>
+<li>The Server responds with a Custom Server Hello message (see <a href="#initialization-of-the-encryption-protocol">above</a>).</li>
+<li>The Server responds with a HandshakeResponse with an error message</li>
+<li>The connection is closed by the server.</li>
+</ol>
+<pre class="mermaid"><code>---
+title: "HandshakeResponse"
+config:
+  packet:
+    bitsPerRow: 8
+    bitWidth: 100
+---
+packet-beta
+  0-0: "Preamble (0x01)"
+  1-2: "Length"
+  3-3: "Status"
+  4-31: "(Encrypted) Message"</code></pre>
+<table>
+<thead>
+<tr>
+<th>Part</th>
+<th>Bits</th>
+<th>Description</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Preamble</td>
+<td>1</td>
+<td>Marker bit which states if unencrypted (<code>0x00</code>) or encrypted (<code>0x01</code>)</td>
+<td><code>0x00</code></td>
+</tr>
+<tr>
+<td>Length</td>
+<td>1-2</td>
+<td>Length of the Data (an unsigned 16-bit integer in big-endian format)</td>
+<td><code>0x16</code> or <code>0xFFFFFFFFFF</code></td>
+</tr>
+<tr>
+<td>Status</td>
+<td>3</td>
+<td>Status of the Handshake (0x00 = Success, 0x01 = Failure)</td>
+<td><code>0x00</code></td>
+</tr>
+<tr>
+<td>(Encrypted) Message</td>
+<td>4-X</td>
+<td>If the Status indicates success the message will be an encrypted zero byte array. If the Status indicates a Failure it contains an unencrypted utf-8 encoded error message.</td>
+<td><code>0x00</code></td>
+</tr>
+</tbody>
+</table>
 
 
 
@@ -780,7 +948,7 @@ packet-beta
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="July 15, 2025 23:06:54 UTC">July 15, 2025</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="August 4, 2025 13:55:31 UTC">August 4, 2025</span>
   </span>
 
     
