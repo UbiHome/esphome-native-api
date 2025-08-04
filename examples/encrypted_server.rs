@@ -146,7 +146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
 
                 let message = ProtoMessage::SensorStateResponse(SensorStateResponse {
-                    key: 0,
+                    key: 2,
                     state: 25.0,
                     missing_state: false,
                 });

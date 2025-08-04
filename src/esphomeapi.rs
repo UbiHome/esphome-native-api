@@ -243,7 +243,7 @@ impl EspHomeApi {
                                 hello_frame.extend(length);
                                 hello_frame.extend(message_server_hello);
 
-                                debug!("Sending server hello: {:?}", &hello_frame);
+                                debug!("Sending server hello: {:02X?}", &hello_frame);
                                 write
                                     .write_all(&hello_frame)
                                     .await
@@ -289,7 +289,7 @@ impl EspHomeApi {
                                     encrypted_frame.extend(length);
                                     encrypted_frame.extend(message_handshake);
 
-                                    debug!("Sending handshake: {:?}", &encrypted_frame);
+                                    debug!("Sending handshake: {:02X?}", &encrypted_frame);
                                     write
                                         .write_all(&encrypted_frame)
                                         .await
@@ -318,9 +318,11 @@ impl EspHomeApi {
                                 *encryption_state_changer = EncryptionState::Initialized;
                             }
                             _ => {
-                                let packet =
-                                    [[1].to_vec(), "Only key encryption is enabled".as_bytes().to_vec()]
-                                        .concat();
+                                let packet = [
+                                    [1].to_vec(),
+                                    "Only key encryption is enabled".as_bytes().to_vec(),
+                                ]
+                                .concat();
                                 answer_buf = construct_frame(&packet, true).unwrap();
                                 disconnect = true;
                             }
@@ -404,7 +406,7 @@ impl EspHomeApi {
 
                     let message;
                     let preamble = buf[cursor] as usize;
-                    // trace!("Cursor: {:?}", &cursor);
+                    trace!("Cursor: {:?}", &cursor);
                     // trace!("n: {:?}", &n);
 
                     match preamble {
@@ -417,6 +419,19 @@ impl EspHomeApi {
                                 &buf[cursor + 2..cursor + 3 + len].to_vec(),
                             )
                             .unwrap();
+
+                    match &message {
+                        ProtoMessage::HelloRequest(hello_request) => {
+                            debug!("HelloRequest: {:?}", hello_request);
+
+                            answer_messages_tx_clone
+                                .send(ProtoMessage::HelloResponse(hello_response.clone()))
+                                .unwrap();
+                            continue;
+                        }
+                        _ => {}
+                    }
+
                             cursor += 3 + len;
                         }
                         1 => {
@@ -489,8 +504,11 @@ impl EspHomeApi {
                                     continue;
                                 }
                                 EncryptionState::Initialized => {
-                                    let len = BigEndian::read_u16(&buf[cursor + 1..3]) as usize;
-                                    let decrypted_message = &buf[3..len + 3];
+                                    let len =
+                                        BigEndian::read_u16(&buf[cursor + 1..cursor + 3]) as usize;
+                                    // trace!("Length: {:?}", &len);
+                                    let decrypted_message = &buf[cursor + 3..cursor + len + 3];
+                                    // trace!("To decrypt message: {:02X?}", &decrypted_message);
                                     {
                                         let mut decrypt_cipher_changer =
                                             decrypt_cypher_clone.lock().await;
@@ -503,7 +521,7 @@ impl EspHomeApi {
                                     key_authenticated
                                         .store(true, std::sync::atomic::Ordering::Relaxed);
 
-                                    cursor += 3 + len + 3;
+                                    cursor += 3 + len;
                                 }
                                 _ => {
                                     debug!(
@@ -522,36 +540,30 @@ impl EspHomeApi {
 
                     // Initialization Messages (unauthenticated)
                     match &message {
-                        ProtoMessage::HelloRequest(hello_request) => {
-                            debug!("HelloRequest: {:?}", hello_request);
-
-                            answer_messages_tx_clone
-                                .send(ProtoMessage::HelloResponse(hello_response.clone()))
-                                .unwrap();
-                            continue;
-                        }
                         ProtoMessage::ConnectRequest(connect_request) => {
-                            if encryption_key.is_none() {
-                                debug!("ConnectRequest: {:?}", connect_request);
-                                let mut valid = false;
+                            debug!("ConnectRequest: {:?}", connect_request);
+                            let mut valid = false;
+                            if encryption_key.is_some() {
+                                valid = true;
+                            } else {
                                 if let Some(password) = password_clone.clone() {
                                     valid = constant_time_eq(
                                         connect_request.password.as_bytes(),
                                         password.as_bytes(),
                                     );
                                 }
-
-                                password_authenticated
-                                    .store(valid, std::sync::atomic::Ordering::Relaxed);
-                                let response_message = ConnectResponse {
-                                    invalid_password: !valid,
-                                };
-                                debug!("ConnectResponse: {:?}", response_message);
-                                answer_messages_tx_clone
-                                    .send(ProtoMessage::ConnectResponse(response_message))
-                                    .unwrap();
-                                continue;
                             }
+
+                            password_authenticated
+                                .store(valid, std::sync::atomic::Ordering::Relaxed);
+                            let response_message = ConnectResponse {
+                                invalid_password: !valid,
+                            };
+                            debug!("ConnectResponse: {:?}", response_message);
+                            answer_messages_tx_clone
+                                .send(ProtoMessage::ConnectResponse(response_message))
+                                .unwrap();
+                            continue;
                         }
 
                         ProtoMessage::DisconnectRequest(disconnect_request) => {

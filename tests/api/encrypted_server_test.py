@@ -150,7 +150,6 @@ async def test_do_not_allow_wrong_key(encrypted_server: EspHomeTestServer):
         await api.connect(login=False)
 
 
-@pytest.mark.skip("TODO: Needs to be fixed in rust")
 async def test_encrypted_server_with_login(encrypted_server: EspHomeTestServer):
     """test encrypted server"""
 
