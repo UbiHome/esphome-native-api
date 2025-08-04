@@ -420,17 +420,16 @@ impl EspHomeApi {
                             )
                             .unwrap();
 
-                    match &message {
-                        ProtoMessage::HelloRequest(hello_request) => {
-                            debug!("HelloRequest: {:?}", hello_request);
+                            match &message {
+                                ProtoMessage::HelloRequest(hello_request) => {
+                                    debug!("HelloRequest: {:?}", hello_request);
 
-                            answer_messages_tx_clone
-                                .send(ProtoMessage::HelloResponse(hello_response.clone()))
-                                .unwrap();
-                            continue;
-                        }
-                        _ => {}
-                    }
+                                    answer_messages_tx_clone
+                                        .send(ProtoMessage::HelloResponse(hello_response.clone()))
+                                        .unwrap();
+                                }
+                                _ => {}
+                            }
 
                             cursor += 3 + len;
                         }

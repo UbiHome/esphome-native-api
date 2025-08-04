@@ -165,3 +165,5 @@ async def test_encrypted_server_with_login(encrypted_server: EspHomeTestServer):
     assert api.api_version.major == 1
     assert api.api_version.minor == 42
     assert api.log_name == "test_device @ 127.0.0.1"
+
+    await api.disconnect()
