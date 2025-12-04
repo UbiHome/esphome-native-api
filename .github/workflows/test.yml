@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  schedule:
+    - cron:  "0 0 * * 1"
+  workflow_dispatch: 
+
+permissions:
+  contents: read # for checkout
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  generate_protos:
+    name: Get Protobuf files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Generate Protobuf files
+        run: | 
+          cd generator
+          cargo run
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload proto source files
+        uses: actions/upload-artifact@v4
+        with:
+          name: proto_src_files
+          path: src/proto
+
+      - name: Upload cargo.toml
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo_toml
+          path: Cargo.toml
+
+  up-to-date:
+    name: E2E Test
+    needs: generate_protos
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download proto source files
+        uses: actions/download-artifact@v4
+        with:
+          name: proto_src_files
+          path: src/proto
+      - name: Download cargo.toml
+        uses: actions/download-artifact@v4
+        with:
+          name: cargo_toml
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          # Install a specific version of uv.
+          version: "0.8.4"       
+
+      - name: Run tests
+        run: |-
+          cargo build --examples
+          cd tests
+          uv add aioesphomeapi>30
+          uv run pytest
