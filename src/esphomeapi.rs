@@ -4,11 +4,11 @@ use crate::frame::to_unencrypted_frame;
 use crate::packet_encrypted;
 use crate::parser;
 use crate::parser::ProtoMessage;
-use crate::proto::version_2025_6_3::ConnectResponse;
-use crate::proto::version_2025_6_3::DeviceInfoResponse;
-use crate::proto::version_2025_6_3::DisconnectResponse;
-use crate::proto::version_2025_6_3::HelloResponse;
-use crate::proto::version_2025_6_3::PingResponse;
+use crate::proto::version_2025_11_3::AuthenticationResponse;
+use crate::proto::version_2025_11_3::DeviceInfoResponse;
+use crate::proto::version_2025_11_3::DisconnectResponse;
+use crate::proto::version_2025_11_3::HelloResponse;
+use crate::proto::version_2025_11_3::PingResponse;
 use base64::prelude::*;
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
@@ -168,6 +168,11 @@ impl EspHomeApi {
             voice_assistant_feature_flags: self.voice_assistant_feature_flags,
             suggested_area: self.suggested_area.clone().unwrap_or_default(),
             bluetooth_mac_address: self.bluetooth_mac_address.clone().unwrap_or_default(),
+            areas: vec![],
+            devices: vec![],
+            area: None,
+            zwave_proxy_feature_flags:0,
+            zwave_home_id: 0
         };
 
         if self.encryption_key.is_some() {
@@ -386,9 +391,14 @@ impl EspHomeApi {
 
                 if disconnect {
                     debug!("Disconnecting");
-                    write.shutdown().await.expect("failed to shutdown socket");
-                    break;
+                match write.shutdown().await {
+                    Err(err) => {
+                        error!("failed to shutdown socket: {:?}", err);
+                        break;
+                    },
+                    _ => break
                 }
+            }
             }
         });
 
@@ -503,6 +513,8 @@ impl EspHomeApi {
                                             }
                                         }
                                     }
+
+                                    // TODO: Send to early?
                                     answer_messages_tx_clone
                                         .send(ProtoMessage::HelloResponse(
                                             hello_response.clone(),
@@ -550,8 +562,8 @@ impl EspHomeApi {
 
                     // Initialization Messages (unauthenticated)
                     match &message {
-                        ProtoMessage::ConnectRequest(connect_request) => {
-                            debug!("ConnectRequest: {:?}", connect_request);
+                        ProtoMessage::AuthenticationRequest(connect_request) => {
+                            debug!("AuthenticationRequest: {:?}", connect_request);
                             let mut valid = false;
                             if encryption_key.is_some() {
                                 valid = true;
@@ -566,12 +578,12 @@ impl EspHomeApi {
 
                             password_authenticated
                                 .store(valid, std::sync::atomic::Ordering::Relaxed);
-                            let response_message = ConnectResponse {
+                            let response_message = AuthenticationResponse {
                                 invalid_password: !valid,
                             };
-                            debug!("ConnectResponse: {:?}", response_message);
+                            debug!("AuthenticationResponse: {:?}", response_message);
                             answer_messages_tx_clone
-                                .send(ProtoMessage::ConnectResponse(response_message))
+                                .send(ProtoMessage::AuthenticationResponse(response_message))
                                 .unwrap();
                             continue;
                         }

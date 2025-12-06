@@ -2,8 +2,8 @@ use std::{future, net::SocketAddr, time::Duration};
 
 use esphome_native_api::esphomeapi::EspHomeApi;
 use esphome_native_api::parser::ProtoMessage;
-use esphome_native_api::proto::version_2025_6_3::{ListEntitiesButtonResponse, ListEntitiesDoneResponse};
-use esphome_native_api::proto::version_2025_6_3::{
+use esphome_native_api::proto::version_2025_11_3::{ListEntitiesButtonResponse, ListEntitiesDoneResponse};
+use esphome_native_api::proto::version_2025_11_3::{
     ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse,
     ListEntitiesSwitchResponse, SensorStateResponse,
 };
@@ -57,7 +57,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             object_id: "test_binary_sensor_object_id".to_string(),
                             key: 3,
                             name: "test_binary_sensor".to_string(),
-                            unique_id: "test_binary_sensor_unique_id".to_string(),
+                            // unique_id: "test_binary_sensor_unique_id".to_string(),
+                            device_id: 0,
                             icon: "mdi:test-binary-sensor-icon".to_string(),
                             device_class: "test_binary_sensor_device_class".to_string(),
                             is_status_binary_sensor: true,
@@ -69,7 +70,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         object_id: "test_button_object_id".to_string(),
                         key: 0,
                         name: "test_button".to_string(),
-                        unique_id: "test_button_unique_id".to_string(),
+                        // unique_id: "test_button_unique_id".to_string(),
+                            device_id: 0,
+
                         icon: "mdi:test-button-icon".to_string(),
                         disabled_by_default: false,
                         entity_category: 0,
@@ -79,7 +82,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         object_id: "test_light_object_id".to_string(),
                         key: 4,
                         name: "test_light".to_string(),
-                        unique_id: "test_light_unique_id".to_string(),
+                        // unique_id: "test_light_unique_id".to_string(),
+                            device_id: 0,
+
                         icon: "mdi:test-light-icon".to_string(),
                         disabled_by_default: false,
                         entity_category: 0, // EntityCategory::None as i32
@@ -96,7 +101,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         object_id: "test_sensor_object_id".to_string(),
                         key: 2,
                         name: "test_sensor".to_string(),
-                        unique_id: "test_sensor_unique_id".to_string(),
+                        // unique_id: "test_sensor_unique_id".to_string(),
+                            device_id: 0,
+
                         icon: "mdi:test-sensor-icon".to_string(),
                         unit_of_measurement: "°C".to_string(),
                         accuracy_decimals: 2,
@@ -111,7 +118,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         object_id: "test_switch_object_id".to_string(),
                         key: 1,
                         name: "test_switch".to_string(),
-                        unique_id: "test_switch_unique_id".to_string(),
+                        // unique_id: "test_switch_unique_id".to_string(),
+                            device_id: 0,
+
                         icon: "mdi:test-switch-icon".to_string(),
                         device_class: "test_switch_device_class".to_string(),
                         disabled_by_default: false,
@@ -149,6 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
 
                 let message = ProtoMessage::SensorStateResponse(SensorStateResponse {
+                            device_id: 0,
                     key: 0,
                     state: 25.0,
                     missing_state: false,

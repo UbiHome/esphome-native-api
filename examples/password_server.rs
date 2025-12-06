@@ -2,8 +2,8 @@ use std::{future, net::SocketAddr, time::Duration};
 
 use esphome_native_api::esphomeapi::EspHomeApi;
 use esphome_native_api::parser::ProtoMessage;
-use esphome_native_api::proto::version_2025_6_3::{ListEntitiesButtonResponse, ListEntitiesDoneResponse};
-use esphome_native_api::proto::version_2025_6_3::{
+use esphome_native_api::proto::version_2025_11_3::{ListEntitiesButtonResponse, ListEntitiesDoneResponse};
+use esphome_native_api::proto::version_2025_11_3::{
     ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse,
     ListEntitiesSwitchResponse, SensorStateResponse,
 };
