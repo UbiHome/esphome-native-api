@@ -30,7 +30,8 @@ use std::sync::atomic::AtomicBool;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
-use tokio::sync::broadcast;
+use tokio::sync::broadcast::{self, error::RecvError};
+use tokio::sync::mpsc;
 use typed_builder::TypedBuilder;
 
 #[derive(Debug)]
@@ -125,7 +126,7 @@ impl EspHomeApi {
         tcp_stream: TcpStream,
     ) -> Result<
         (
-            broadcast::Sender<ProtoMessage>,
+            mpsc::Sender<ProtoMessage>,
             broadcast::Receiver<ProtoMessage>,
         ),
         Box<dyn std::error::Error>,
@@ -136,11 +137,10 @@ impl EspHomeApi {
         }
 
         // Channel for direct answers (prioritized when sending)
-        let (answer_messages_tx, mut answer_messages_rx) = broadcast::channel::<ProtoMessage>(16);
+        let (answer_messages_tx, mut answer_messages_rx) = mpsc::channel::<ProtoMessage>(16);
         // Channel for normal messages (e.g. state updates)
-        let (messages_tx, mut messages_rx) = broadcast::channel::<ProtoMessage>(16);
-        let (outgoing_messages_tx, mut outgoing_messages_rx) =
-            broadcast::channel::<ProtoMessage>(16);
+        let (messages_tx, mut messages_rx) = mpsc::channel::<ProtoMessage>(16);
+        let (outgoing_messages_tx, outgoing_messages_rx) = broadcast::channel::<ProtoMessage>(16);
 
         // Asynchronously wait for an inbound socket.
         let (mut read, mut write) = tcp_stream.into_split();
@@ -169,8 +169,8 @@ impl EspHomeApi {
             areas: vec![],
             devices: vec![],
             area: None,
-            zwave_proxy_feature_flags:0,
-            zwave_home_id: 0
+            zwave_proxy_feature_flags: 0,
+            zwave_home_id: 0,
         };
 
         if self.encryption_key.is_some() {
@@ -209,7 +209,6 @@ impl EspHomeApi {
             let mut disconnect = false;
             loop {
                 let mut answer_buf: Vec<u8> = vec![];
-                let answer_message: ProtoMessage;
                 let encryption = encrypted_api.load(std::sync::atomic::Ordering::Relaxed);
 
                 // If encryption is enabled we have to make sure initialization messages are send before any custom messages
@@ -227,19 +226,23 @@ impl EspHomeApi {
                 }
 
                 // Wait for any new message
-                if encryption && !initialized {
-                    answer_message = answer_messages_rx.recv().await.unwrap();
+                let answer_message = if encryption && !initialized {
+                    answer_messages_rx.recv().await
                 } else {
                     tokio::select! {
                         biased; // Poll answer_messages_rx first
-                        message = answer_messages_rx.recv() => {
-                            answer_message = message.unwrap();
-                        }
-                        message = messages_rx.recv() => {
-                            answer_message = message.unwrap();
-                        }
-                    };
-                }
+                        message = answer_messages_rx.recv() => message,
+                        message = messages_rx.recv() => message,
+                    }
+                };
+
+                let Some(answer_message) = answer_message else {
+                    if answer_messages_rx.is_closed() && messages_rx.is_closed() {
+                        break;
+                    } else {
+                        continue;
+                    }
+                };
 
                 if encryption {
                     {
@@ -393,14 +396,14 @@ impl EspHomeApi {
 
                 if disconnect {
                     debug!("Disconnecting");
-                match write.shutdown().await {
-                    Err(err) => {
-                        error!("failed to shutdown socket: {:?}", err);
-                        break;
-                    },
-                    _ => break
+                    match write.shutdown().await {
+                        Err(err) => {
+                            error!("failed to shutdown socket: {:?}", err);
+                            break;
+                        }
+                        _ => break,
+                    }
                 }
-            }
             }
         });
 
@@ -460,6 +463,7 @@ impl EspHomeApi {
 
                                     answer_messages_tx_clone
                                         .send(ProtoMessage::HelloResponse(hello_response.clone()))
+                                        .await
                                         .unwrap();
                                     continue;
                                 }
@@ -500,11 +504,9 @@ impl EspHomeApi {
                                     handshake_state.push_psk(&noise_psk);
                                     match handshake_state.read_message_vec(&buf[3 + 3 + 1..n]) {
                                         Ok(_) => {
-                                            {
-                                                let mut mutex_changer =
-                                                    handshake_state_clone.lock().await;
-                                                *mutex_changer = Option::Some(handshake_state);
-                                            }
+                                            let mut mutex_changer =
+                                                handshake_state_clone.lock().await;
+                                            *mutex_changer = Option::Some(handshake_state);
                                         }
                                         Err(e) => {
                                             match e.kind() {
@@ -521,12 +523,10 @@ impl EspHomeApi {
 
                                     // This Message is never send but needed to trigger sending the SERVER_HELLO
                                     answer_messages_tx_clone
-                                        .send(ProtoMessage::HelloResponse(
-                                            hello_response.clone(),
-                                        ))
+                                        .send(ProtoMessage::HelloResponse(hello_response.clone()))
+                                        .await
                                         .unwrap();
-                                    *encryption_state_changer =
-                                        EncryptionState::ClientHandshake;
+                                    *encryption_state_changer = EncryptionState::ClientHandshake;
                                     cursor += n;
                                     continue;
                                 }
@@ -569,11 +569,10 @@ impl EspHomeApi {
                     // Initialization Messages (unauthenticated)
                     match &message {
                         ProtoMessage::HelloRequest(_) => {
-                                answer_messages_tx_clone
-                                    .send(ProtoMessage::HelloResponse(
-                                        hello_response.clone(),
-                                    ))
-                                    .unwrap();
+                            answer_messages_tx_clone
+                                .send(ProtoMessage::HelloResponse(hello_response.clone()))
+                                .await
+                                .unwrap();
                         }
                         ProtoMessage::AuthenticationRequest(connect_request) => {
                             debug!("AuthenticationRequest: {:?}", connect_request);
@@ -597,6 +596,7 @@ impl EspHomeApi {
                             debug!("AuthenticationResponse: {:?}", response_message);
                             answer_messages_tx_clone
                                 .send(ProtoMessage::AuthenticationResponse(response_message))
+                                .await
                                 .unwrap();
                             continue;
                         }
@@ -605,6 +605,7 @@ impl EspHomeApi {
                             let response_message = DisconnectResponse {};
                             answer_messages_tx_clone
                                 .send(ProtoMessage::DisconnectResponse(response_message))
+                                .await
                                 .unwrap();
                             continue;
                         }
@@ -617,6 +618,7 @@ impl EspHomeApi {
                     if !auth_test {
                         answer_messages_tx_clone
                             .send(ProtoMessage::DisconnectResponse(DisconnectResponse {}))
+                            .await
                             .unwrap();
                         continue;
                     }
@@ -628,12 +630,14 @@ impl EspHomeApi {
                             let response_message = PingResponse {};
                             answer_messages_tx_clone
                                 .send(ProtoMessage::PingResponse(response_message))
+                                .await
                                 .unwrap();
                         }
                         ProtoMessage::DeviceInfoRequest(device_info_request) => {
                             debug!("DeviceInfoRequest: {:?}", device_info_request);
                             answer_messages_tx_clone
                                 .send(ProtoMessage::DeviceInfoResponse(device_info.clone()))
+                                .await
                                 .unwrap();
                         }
                         // Handled above

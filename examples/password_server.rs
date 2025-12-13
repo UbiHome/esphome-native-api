@@ -2,10 +2,12 @@ use std::{future, net::SocketAddr, time::Duration};
 
 use esphome_native_api::esphomeapi::EspHomeApi;
 use esphome_native_api::parser::ProtoMessage;
-use esphome_native_api::proto::version_2025_12_1::{ListEntitiesButtonResponse, ListEntitiesDoneResponse};
 use esphome_native_api::proto::version_2025_12_1::{
     ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse,
     ListEntitiesSwitchResponse, SensorStateResponse,
+};
+use esphome_native_api::proto::version_2025_12_1::{
+    ListEntitiesButtonResponse, ListEntitiesDoneResponse,
 };
 use log::{LevelFilter, debug, info};
 use tokio::{net::TcpSocket, signal, time::sleep};
@@ -40,8 +42,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .name("test_device".to_string())
                     .build();
 
-
-
                 let (tx, mut rx) = server.start(stream).await.expect("Failed to start server");
                 let tx_clone = tx.clone();
                 debug!("Server started");
@@ -57,16 +57,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ProtoMessage::ListEntitiesRequest(list_entities_request) => {
                                 debug!("ListEntitiesRequest: {:?}", list_entities_request);
 
-                                tx_clone.send(ProtoMessage::ListEntitiesDoneResponse(
-                                    ListEntitiesDoneResponse {},
-                                ))
-                                .unwrap();
+                                tx_clone
+                                    .send(ProtoMessage::ListEntitiesDoneResponse(
+                                        ListEntitiesDoneResponse {},
+                                    ))
+                                    .await
+                                    .unwrap();
                             }
                             _ => {}
                         }
                     }
                 });
-
 
                 // Wait indefinitely for the interrupts
                 let future = future::pending();
