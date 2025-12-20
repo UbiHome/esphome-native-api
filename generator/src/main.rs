@@ -3,7 +3,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, Write};
 use std::path::Path;
 use std::env;
-const current_version: &str = "2025.6.3";
+const current_version: &str = "2025.12.1";
 const last_supplied_version: &str = "2025.2.1";
 
 fn get_package_name(version: &str) -> String {
