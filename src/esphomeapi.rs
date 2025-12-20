@@ -25,7 +25,6 @@ use noise_protocol::patterns::noise_nn_psk0;
 use noise_rust_crypto::ChaCha20Poly1305;
 use noise_rust_crypto::Sha256;
 use noise_rust_crypto::X25519;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -39,7 +38,6 @@ pub(crate) enum EncryptionState {
     Uninitialized,
     ClientHandshake,
     ServerHello,
-    ServerHandshake,
     Initialized,
     Failure,
 }
@@ -245,6 +243,7 @@ impl EspHomeApi {
 
                 if encryption {
                     {
+                        let mut first_run = false;
                         let mut encryption_state_changer = encryption_state.lock().await;
                         match *encryption_state_changer {
                             EncryptionState::ClientHandshake => {
@@ -275,6 +274,7 @@ impl EspHomeApi {
                                 write.flush().await.expect("failed to flush server hello");
 
                                 *encryption_state_changer = EncryptionState::ServerHello;
+                                first_run = true;
                             }
                             _ => {}
                         }
@@ -319,13 +319,16 @@ impl EspHomeApi {
                                         .await
                                         .expect("failed to write encrypted response");
 
-                                    *encryption_state_changer = EncryptionState::ServerHandshake;
+                                    *encryption_state_changer = EncryptionState::Initialized;
                                 }
                             }
                             _ => {}
                         }
                         match *encryption_state_changer {
-                            EncryptionState::Initialized | EncryptionState::ServerHandshake => {
+                            EncryptionState::Initialized => {
+                                if first_run {
+                                    continue;
+                                }
                                 debug!("Answer message: {:?}", answer_message);
                                 // Use normal messaging
                                 {
@@ -339,8 +342,6 @@ impl EspHomeApi {
 
                                     answer_buf = [answer_buf, encrypted_frame].concat();
                                 }
-
-                                *encryption_state_changer = EncryptionState::Initialized;
                             }
                             _ => {
                                 let packet = [
