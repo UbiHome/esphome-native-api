@@ -1,4 +1,5 @@
 from asyncio import sleep
+import logging
 from unittest.mock import AsyncMock, Mock
 import aioesphomeapi
 from aioesphomeapi.reconnect_logic import ReconnectLogic, ReconnectLogicState
@@ -180,6 +181,8 @@ async def test_encrypted_server_reconnect(encrypted_server: EspHomeTestServer):
         None,
         noise_psk=encrypted_server.noise_psk,
     )
+
+    logging.fatal("FIRST Connect - Start")
     await api.connect(login=False)
 
     # Test API Hello
@@ -199,6 +202,8 @@ async def test_encrypted_server_reconnect(encrypted_server: EspHomeTestServer):
 
     await api.disconnect()
 
+
+    logging.fatal("SECOND Connect - Start")
     await api.connect(login=False)
 
     # Test API Hello
@@ -218,6 +223,7 @@ async def test_encrypted_server_reconnect(encrypted_server: EspHomeTestServer):
 
     await api.disconnect()
 
+    logging.fatal("THIRD Connect - Start")
     await api.connect(login=False)
 
     # Test API Hello
@@ -236,6 +242,8 @@ async def test_encrypted_server_reconnect(encrypted_server: EspHomeTestServer):
     assert device_info.suggested_area == "Test Area"
 
     await api.disconnect()
+
+    assert False
 
 
 async def test_encrypted_server_parallel(encrypted_server: EspHomeTestServer):

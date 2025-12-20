@@ -326,6 +326,7 @@ impl EspHomeApi {
                         }
                         match *encryption_state_changer {
                             EncryptionState::Initialized | EncryptionState::ServerHandshake => {
+                                debug!("Answer message: {:?}", answer_message);
                                 // Use normal messaging
                                 {
                                     let mut encrypt_cipher_changer =
@@ -365,11 +366,11 @@ impl EspHomeApi {
                         }
                     }
                 } else {
+                    debug!("Answer message: {:?}", answer_message);
                     answer_buf =
                         [answer_buf, to_unencrypted_frame(&answer_message).unwrap()].concat();
                 }
 
-                debug!("Answer message: {:?}", answer_message);
                 match answer_message {
                     ProtoMessage::DisconnectResponse(_) => {
                         disconnect = true;
@@ -441,6 +442,7 @@ impl EspHomeApi {
 
                     match preamble {
                         0 => {
+                            trace!("Cleartext message");
                             // Cleartext
 
                             // TODO: use dynamic length bits
@@ -464,11 +466,13 @@ impl EspHomeApi {
                             }
                         }
                         1 => {
-                            // Encrypted
+                            trace!("Encrypted message");
 
                             let mut encryption_state_changer = encryption_state.lock().await;
                             match *encryption_state_changer {
                                 EncryptionState::Uninitialized => {
+                                    trace!("Encryption State: Uninitialized");
+
                                     encrypted_api.store(true, std::sync::atomic::Ordering::Relaxed);
 
                                     // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
@@ -514,7 +518,7 @@ impl EspHomeApi {
                                         }
                                     }
 
-                                    // TODO: Send to early?
+                                    // This Message is never send but needed to trigger sending the SERVER_HELLO
                                     answer_messages_tx_clone
                                         .send(ProtoMessage::HelloResponse(
                                             hello_response.clone(),
@@ -526,6 +530,7 @@ impl EspHomeApi {
                                     continue;
                                 }
                                 EncryptionState::Initialized => {
+                                    trace!("Encryption State: Initialized");
                                     let len =
                                         BigEndian::read_u16(&buf[cursor + 1..cursor + 3]) as usize;
                                     // trace!("Length: {:?}", &len);
@@ -562,6 +567,13 @@ impl EspHomeApi {
 
                     // Initialization Messages (unauthenticated)
                     match &message {
+                        ProtoMessage::HelloRequest(_) => {
+                                answer_messages_tx_clone
+                                    .send(ProtoMessage::HelloResponse(
+                                        hello_response.clone(),
+                                    ))
+                                    .unwrap();
+                        }
                         ProtoMessage::AuthenticationRequest(connect_request) => {
                             debug!("AuthenticationRequest: {:?}", connect_request);
                             let mut valid = false;
