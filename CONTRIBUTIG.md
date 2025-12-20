@@ -3,11 +3,11 @@
 ## Development
 
 ```bash
-# Generate api code
-cd generator
-cargo run
+# Generate API code
+cargo run -p generator
+```
 
-
+```
 # Execute example
 cargo run --example server
 ```

@@ -2,8 +2,8 @@ name: Scheduled Test
 
 on:
   schedule:
-    - cron:  "0 0 * * 1"
-  workflow_dispatch: 
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,11 +22,9 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-          
+
       - name: Generate Protobuf files
-        run: | 
-          cd generator
-          cargo run
+        run: cargo run -p generator
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -68,7 +66,7 @@ jobs:
         with:
           enable-cache: true
           # Install a specific version of uv.
-          version: "0.8.4"       
+          version: "0.8.4"
 
       - name: Run tests
         run: |-
