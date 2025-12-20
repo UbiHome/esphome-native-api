@@ -243,8 +243,6 @@ async def test_encrypted_server_reconnect(encrypted_server: EspHomeTestServer):
 
     await api.disconnect()
 
-    assert False
-
 
 async def test_encrypted_server_parallel(encrypted_server: EspHomeTestServer):
     """test encrypted server"""

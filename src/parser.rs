@@ -1,5 +1,5 @@
 // TODO: Parser should part of the proto generator 
-use crate::proto::version_2025_11_3::{
+use crate::proto::version_2025_12_1::{
     AlarmControlPanelCommandRequest, AlarmControlPanelStateResponse, BinarySensorStateResponse,
     BluetoothConnectionsFreeResponse, BluetoothDeviceClearCacheResponse,
     BluetoothDeviceConnectionResponse, BluetoothDevicePairingResponse, BluetoothDeviceRequest,

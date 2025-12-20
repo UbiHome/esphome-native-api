@@ -1,9 +1,9 @@
 use std::{future, net::SocketAddr, time::Duration};
 
-use esphome_native_api::{esphomeserver::EspHomeServer, proto::version_2025_11_3::{ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse, ListEntitiesSwitchResponse, SensorStateResponse}};
+use esphome_native_api::{esphomeserver::EspHomeServer, proto::version_2025_12_1::{ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse, ListEntitiesSwitchResponse, SensorStateResponse}};
 use log::{debug, info, LevelFilter};
 use tokio::{net::TcpSocket, signal, time::sleep};
-use esphome_native_api::proto::version_2025_11_3::ListEntitiesButtonResponse;
+use esphome_native_api::proto::version_2025_12_1::ListEntitiesButtonResponse;
 use esphome_native_api::parser::ProtoMessage;
 use esphome_native_api::esphomeapi::EspHomeApi;
 

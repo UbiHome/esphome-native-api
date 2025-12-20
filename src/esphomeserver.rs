@@ -1,7 +1,7 @@
 use crate::esphomeapi::EspHomeApi;
 use crate::parser::ProtoMessage;
 
-use crate::proto::version_2025_11_3::ListEntitiesDoneResponse;
+use crate::proto::version_2025_12_1::ListEntitiesDoneResponse;
 use log::debug;
 use log::error;
 use log::info;
