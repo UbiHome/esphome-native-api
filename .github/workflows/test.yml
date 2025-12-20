@@ -1,4 +1,4 @@
-name: Release
+name: Scheduled Test
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch: 
 
 permissions:
-  contents: read # for checkout
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
