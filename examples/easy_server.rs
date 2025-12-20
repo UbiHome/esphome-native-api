@@ -1,18 +1,25 @@
 use std::{future, net::SocketAddr, time::Duration};
 
-use esphome_native_api::{esphomeserver::EspHomeServer, proto::version_2025_12_1::{ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse, ListEntitiesSwitchResponse, SensorStateResponse}};
-use log::{debug, info, LevelFilter};
-use tokio::{net::TcpSocket, signal, time::sleep};
-use esphome_native_api::proto::version_2025_12_1::ListEntitiesButtonResponse;
-use esphome_native_api::parser::ProtoMessage;
 use esphome_native_api::esphomeapi::EspHomeApi;
-
+use esphome_native_api::parser::ProtoMessage;
+use esphome_native_api::proto::version_2025_12_1::ListEntitiesButtonResponse;
+use esphome_native_api::{
+    esphomeserver::EspHomeServer,
+    proto::version_2025_12_1::{
+        ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse,
+        ListEntitiesSwitchResponse, SensorStateResponse,
+    },
+};
+use log::{LevelFilter, debug, info};
+use tokio::{net::TcpSocket, signal, time::sleep};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    pretty_env_logger::formatted_builder().filter_level(LevelFilter::Debug).init();
+    pretty_env_logger::formatted_builder()
+        .filter_level(LevelFilter::Debug)
+        .init();
 
-    let addr: SocketAddr = SocketAddr::from(([127, 0, 0, 1], 7000));
+    let addr: SocketAddr = SocketAddr::from(([127, 0, 0, 1], 6053));
     let socket = TcpSocket::new_v4().unwrap();
     socket.set_reuseaddr(true).unwrap();
 
@@ -22,9 +29,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug!("Listening on: {}", addr);
 
     let main_server = async {
-
         loop {
-            let (stream, _) = listener.accept().await
+            let (stream, _) = listener
+                .accept()
+                .await
                 .expect("Failed to accept connection");
             debug!("Accepted request from {}", stream.peer_addr().unwrap());
 
@@ -63,14 +71,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             //     server.add_entity("test_binary_sensor", binary_sensor.clone());
 
             //     let button = ProtoMessage::ListEntitiesButtonResponse(
-            //         ListEntitiesButtonResponse { 
-            //             object_id: "test_button_object_id".to_string(), 
-            //             key: 0, 
-            //             name: "test_button".to_string(), 
-            //             unique_id: "test_button_unique_id".to_string(), 
-            //             icon: "mdi:test-button-icon".to_string(), 
-            //             disabled_by_default: false, 
-            //             entity_category: 0, 
+            //         ListEntitiesButtonResponse {
+            //             object_id: "test_button_object_id".to_string(),
+            //             key: 0,
+            //             name: "test_button".to_string(),
+            //             unique_id: "test_button_unique_id".to_string(),
+            //             icon: "mdi:test-button-icon".to_string(),
+            //             disabled_by_default: false,
+            //             entity_category: 0,
             //             device_class: "test_button_device_class".to_string(),
             //         },
             //     );
@@ -159,7 +167,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // });
         }
     };
-    
+
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -185,5 +193,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Stopped");
 
     std::process::exit(0);
-
 }

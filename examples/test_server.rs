@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter_level(LevelFilter::Debug)
         .init();
 
-    let addr: SocketAddr = SocketAddr::from(([127, 0, 0, 1], 7000));
+    let addr: SocketAddr = SocketAddr::from(([127, 0, 0, 1], 6053));
     let socket = TcpSocket::new_v4().unwrap();
     socket.set_reuseaddr(true).unwrap();
 
