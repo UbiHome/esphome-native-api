@@ -4,7 +4,7 @@ import pytest
 
 from tests.conftest import EspHomeTestServer
 
-
+@pytest.mark.skip("Skip because of https://github.com/esphome/aioesphomeapi/issues/1463")
 async def test_wrong_password(password_server: EspHomeTestServer):
     """
     Test that wrong_password returns invalid auth error

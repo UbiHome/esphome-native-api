@@ -27,7 +27,7 @@ pub fn message_to_packet(message: &ProtoMessage) -> Result<Vec<u8>, Box<dyn std:
 mod tests {
     use test_log::test;
 
-    use crate::{proto::{version_2025_6_3::HelloRequest}};
+    use crate::{proto::{version_2025_12_1::HelloRequest}};
 
     use super::*;
 

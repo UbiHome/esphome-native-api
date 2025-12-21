@@ -4,11 +4,11 @@ use crate::frame::to_unencrypted_frame;
 use crate::packet_encrypted;
 use crate::parser;
 use crate::parser::ProtoMessage;
-use crate::proto::version_2025_6_3::ConnectResponse;
-use crate::proto::version_2025_6_3::DeviceInfoResponse;
-use crate::proto::version_2025_6_3::DisconnectResponse;
-use crate::proto::version_2025_6_3::HelloResponse;
-use crate::proto::version_2025_6_3::PingResponse;
+use crate::proto::version_2025_12_1::AuthenticationResponse;
+use crate::proto::version_2025_12_1::DeviceInfoResponse;
+use crate::proto::version_2025_12_1::DisconnectResponse;
+use crate::proto::version_2025_12_1::HelloResponse;
+use crate::proto::version_2025_12_1::PingResponse;
 use base64::prelude::*;
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
@@ -25,7 +25,6 @@ use noise_protocol::patterns::noise_nn_psk0;
 use noise_rust_crypto::ChaCha20Poly1305;
 use noise_rust_crypto::Sha256;
 use noise_rust_crypto::X25519;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -39,7 +38,6 @@ pub(crate) enum EncryptionState {
     Uninitialized,
     ClientHandshake,
     ServerHello,
-    ServerHandshake,
     Initialized,
     Failure,
 }
@@ -168,6 +166,11 @@ impl EspHomeApi {
             voice_assistant_feature_flags: self.voice_assistant_feature_flags,
             suggested_area: self.suggested_area.clone().unwrap_or_default(),
             bluetooth_mac_address: self.bluetooth_mac_address.clone().unwrap_or_default(),
+            areas: vec![],
+            devices: vec![],
+            area: None,
+            zwave_proxy_feature_flags:0,
+            zwave_home_id: 0
         };
 
         if self.encryption_key.is_some() {
@@ -240,6 +243,7 @@ impl EspHomeApi {
 
                 if encryption {
                     {
+                        let mut first_run = false;
                         let mut encryption_state_changer = encryption_state.lock().await;
                         match *encryption_state_changer {
                             EncryptionState::ClientHandshake => {
@@ -270,6 +274,7 @@ impl EspHomeApi {
                                 write.flush().await.expect("failed to flush server hello");
 
                                 *encryption_state_changer = EncryptionState::ServerHello;
+                                first_run = true;
                             }
                             _ => {}
                         }
@@ -314,13 +319,17 @@ impl EspHomeApi {
                                         .await
                                         .expect("failed to write encrypted response");
 
-                                    *encryption_state_changer = EncryptionState::ServerHandshake;
+                                    *encryption_state_changer = EncryptionState::Initialized;
                                 }
                             }
                             _ => {}
                         }
                         match *encryption_state_changer {
-                            EncryptionState::Initialized | EncryptionState::ServerHandshake => {
+                            EncryptionState::Initialized => {
+                                if first_run {
+                                    continue;
+                                }
+                                debug!("Answer message: {:?}", answer_message);
                                 // Use normal messaging
                                 {
                                     let mut encrypt_cipher_changer =
@@ -333,8 +342,6 @@ impl EspHomeApi {
 
                                     answer_buf = [answer_buf, encrypted_frame].concat();
                                 }
-
-                                *encryption_state_changer = EncryptionState::Initialized;
                             }
                             _ => {
                                 let packet = [
@@ -360,11 +367,11 @@ impl EspHomeApi {
                         }
                     }
                 } else {
+                    debug!("Answer message: {:?}", answer_message);
                     answer_buf =
                         [answer_buf, to_unencrypted_frame(&answer_message).unwrap()].concat();
                 }
 
-                debug!("Answer message: {:?}", answer_message);
                 match answer_message {
                     ProtoMessage::DisconnectResponse(_) => {
                         disconnect = true;
@@ -386,9 +393,14 @@ impl EspHomeApi {
 
                 if disconnect {
                     debug!("Disconnecting");
-                    write.shutdown().await.expect("failed to shutdown socket");
-                    break;
+                match write.shutdown().await {
+                    Err(err) => {
+                        error!("failed to shutdown socket: {:?}", err);
+                        break;
+                    },
+                    _ => break
                 }
+            }
             }
         });
 
@@ -431,6 +443,7 @@ impl EspHomeApi {
 
                     match preamble {
                         0 => {
+                            trace!("Cleartext message");
                             // Cleartext
 
                             // TODO: use dynamic length bits
@@ -454,11 +467,13 @@ impl EspHomeApi {
                             }
                         }
                         1 => {
-                            // Encrypted
+                            trace!("Encrypted message");
 
                             let mut encryption_state_changer = encryption_state.lock().await;
                             match *encryption_state_changer {
                                 EncryptionState::Uninitialized => {
+                                    trace!("Encryption State: Uninitialized");
+
                                     encrypted_api.store(true, std::sync::atomic::Ordering::Relaxed);
 
                                     // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
@@ -503,6 +518,8 @@ impl EspHomeApi {
                                             }
                                         }
                                     }
+
+                                    // This Message is never send but needed to trigger sending the SERVER_HELLO
                                     answer_messages_tx_clone
                                         .send(ProtoMessage::HelloResponse(
                                             hello_response.clone(),
@@ -514,6 +531,7 @@ impl EspHomeApi {
                                     continue;
                                 }
                                 EncryptionState::Initialized => {
+                                    trace!("Encryption State: Initialized");
                                     let len =
                                         BigEndian::read_u16(&buf[cursor + 1..cursor + 3]) as usize;
                                     // trace!("Length: {:?}", &len);
@@ -550,8 +568,15 @@ impl EspHomeApi {
 
                     // Initialization Messages (unauthenticated)
                     match &message {
-                        ProtoMessage::ConnectRequest(connect_request) => {
-                            debug!("ConnectRequest: {:?}", connect_request);
+                        ProtoMessage::HelloRequest(_) => {
+                                answer_messages_tx_clone
+                                    .send(ProtoMessage::HelloResponse(
+                                        hello_response.clone(),
+                                    ))
+                                    .unwrap();
+                        }
+                        ProtoMessage::AuthenticationRequest(connect_request) => {
+                            debug!("AuthenticationRequest: {:?}", connect_request);
                             let mut valid = false;
                             if encryption_key.is_some() {
                                 valid = true;
@@ -566,12 +591,12 @@ impl EspHomeApi {
 
                             password_authenticated
                                 .store(valid, std::sync::atomic::Ordering::Relaxed);
-                            let response_message = ConnectResponse {
+                            let response_message = AuthenticationResponse {
                                 invalid_password: !valid,
                             };
-                            debug!("ConnectResponse: {:?}", response_message);
+                            debug!("AuthenticationResponse: {:?}", response_message);
                             answer_messages_tx_clone
-                                .send(ProtoMessage::ConnectResponse(response_message))
+                                .send(ProtoMessage::AuthenticationResponse(response_message))
                                 .unwrap();
                             continue;
                         }

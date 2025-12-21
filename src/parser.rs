@@ -1,4 +1,5 @@
-use crate::proto::version_2025_6_3::{
+// TODO: Parser should part of the proto generator 
+use crate::proto::version_2025_12_1::{
     AlarmControlPanelCommandRequest, AlarmControlPanelStateResponse, BinarySensorStateResponse,
     BluetoothConnectionsFreeResponse, BluetoothDeviceClearCacheResponse,
     BluetoothDeviceConnectionResponse, BluetoothDevicePairingResponse, BluetoothDeviceRequest,
@@ -9,12 +10,12 @@ use crate::proto::version_2025_6_3::{
     BluetoothGattReadResponse, BluetoothGattWriteDescriptorRequest, BluetoothGattWriteRequest,
     BluetoothGattWriteResponse, BluetoothLeAdvertisementResponse,
     BluetoothLeRawAdvertisementsResponse, ButtonCommandRequest, CameraImageRequest,
-    CameraImageResponse, ClimateCommandRequest, ClimateStateResponse, ConnectRequest,
-    ConnectResponse, CoverCommandRequest, CoverStateResponse, DateCommandRequest,
+    CameraImageResponse, ClimateCommandRequest, ClimateStateResponse, AuthenticationRequest,
+    AuthenticationResponse, CoverCommandRequest, CoverStateResponse, DateCommandRequest,
     DateStateResponse, DateTimeCommandRequest, DateTimeStateResponse, DeviceInfoRequest,
     DeviceInfoResponse, DisconnectRequest, DisconnectResponse, EventResponse,
     ExecuteServiceRequest, FanCommandRequest, FanStateResponse, GetTimeRequest, GetTimeResponse,
-    HelloRequest, HelloResponse, HomeAssistantStateResponse, HomeassistantServiceResponse,
+    HelloRequest, HelloResponse, HomeAssistantStateResponse,
     LightCommandRequest, LightStateResponse, ListEntitiesAlarmControlPanelResponse,
     ListEntitiesBinarySensorResponse, ListEntitiesButtonResponse, ListEntitiesCameraResponse,
     ListEntitiesClimateResponse, ListEntitiesCoverResponse, ListEntitiesDateResponse,
@@ -89,8 +90,8 @@ macro_rules! proto_message_mappings {
 proto_message_mappings!(
     1 => HelloRequest,
     2 => HelloResponse,
-    3 => ConnectRequest,
-    4 => ConnectResponse,
+    3 => AuthenticationRequest,
+    4 => AuthenticationResponse,
     5 => DisconnectRequest,
     6 => DisconnectResponse,
     7 => PingRequest,
@@ -121,7 +122,7 @@ proto_message_mappings!(
     32 => LightCommandRequest,
     33 => SwitchCommandRequest,
     34 => SubscribeHomeassistantServicesRequest,
-    35 => HomeassistantServiceResponse,
+    // 35 => HomeassistantServiceResponse,
     36 => GetTimeRequest,
     37 => GetTimeResponse,
     38 => SubscribeHomeAssistantStatesRequest,
