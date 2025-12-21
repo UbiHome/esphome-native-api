@@ -153,7 +153,7 @@ jobs:
           cd tests
           uv run pytest
           uv tool install tox --with tox-uv
-          tox --parallel auto
+          tox
 
 
 
