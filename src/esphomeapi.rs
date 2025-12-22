@@ -31,6 +31,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
+#[cfg(feature = "tracing")]
+use tracing::span;
 use typed_builder::TypedBuilder;
 
 #[derive(Debug)]
@@ -130,6 +132,12 @@ impl EspHomeApi {
         ),
         Box<dyn std::error::Error>,
     > {
+        #[cfg(feature = "tracing")]
+        {
+            let root_span = span!(tracing::Level::INFO, "application_main", version = "1.0.0");
+            let _root_guard = root_span.enter();
+        }
+
         if self.password.is_none() && self.encryption_key.is_none() {
             self.password_authenticated
                 .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -169,8 +177,8 @@ impl EspHomeApi {
             areas: vec![],
             devices: vec![],
             area: None,
-            zwave_proxy_feature_flags:0,
-            zwave_home_id: 0
+            zwave_proxy_feature_flags: 0,
+            zwave_home_id: 0,
         };
 
         if self.encryption_key.is_some() {
@@ -393,14 +401,14 @@ impl EspHomeApi {
 
                 if disconnect {
                     debug!("Disconnecting");
-                match write.shutdown().await {
-                    Err(err) => {
-                        error!("failed to shutdown socket: {:?}", err);
-                        break;
-                    },
-                    _ => break
+                    match write.shutdown().await {
+                        Err(err) => {
+                            error!("failed to shutdown socket: {:?}", err);
+                            break;
+                        }
+                        _ => break,
+                    }
                 }
-            }
             }
         });
 
@@ -500,11 +508,9 @@ impl EspHomeApi {
                                     handshake_state.push_psk(&noise_psk);
                                     match handshake_state.read_message_vec(&buf[3 + 3 + 1..n]) {
                                         Ok(_) => {
-                                            {
-                                                let mut mutex_changer =
-                                                    handshake_state_clone.lock().await;
-                                                *mutex_changer = Option::Some(handshake_state);
-                                            }
+                                            let mut mutex_changer =
+                                                handshake_state_clone.lock().await;
+                                            *mutex_changer = Option::Some(handshake_state);
                                         }
                                         Err(e) => {
                                             match e.kind() {
@@ -521,12 +527,9 @@ impl EspHomeApi {
 
                                     // This Message is never send but needed to trigger sending the SERVER_HELLO
                                     answer_messages_tx_clone
-                                        .send(ProtoMessage::HelloResponse(
-                                            hello_response.clone(),
-                                        ))
+                                        .send(ProtoMessage::HelloResponse(hello_response.clone()))
                                         .unwrap();
-                                    *encryption_state_changer =
-                                        EncryptionState::ClientHandshake;
+                                    *encryption_state_changer = EncryptionState::ClientHandshake;
                                     cursor += n;
                                     continue;
                                 }
@@ -569,11 +572,9 @@ impl EspHomeApi {
                     // Initialization Messages (unauthenticated)
                     match &message {
                         ProtoMessage::HelloRequest(_) => {
-                                answer_messages_tx_clone
-                                    .send(ProtoMessage::HelloResponse(
-                                        hello_response.clone(),
-                                    ))
-                                    .unwrap();
+                            answer_messages_tx_clone
+                                .send(ProtoMessage::HelloResponse(hello_response.clone()))
+                                .unwrap();
                         }
                         ProtoMessage::AuthenticationRequest(connect_request) => {
                             debug!("AuthenticationRequest: {:?}", connect_request);

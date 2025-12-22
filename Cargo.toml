@@ -28,6 +28,7 @@ base64 = "0.22.1"
 noise-rust-crypto = "0.6.2"
 noise-protocol = "0.2.0"
 byteorder = "1.5.0"
+tracing = { version = "0.1.44", optional = true }
 
 [workspace]
 resolver = "2"
@@ -36,9 +37,17 @@ members = ["generator"]
 [dev-dependencies]
 pretty_env_logger = "0.5.0"
 test-log = { version = "0.2.16", features = ["log", "color"] }
+opentelemetry = "0.31.0"
+opentelemetry_sdk = "0.31.0"
+opentelemetry-otlp = "0.31.0"
+opentelemetry-semantic-conventions = "0.31.0"
+tracing-opentelemetry = "0.32.0"
+tracing-subscriber = "0.3.19"
+tracing-core = "0.1.36"
 
 [features]
 default = ["std", "version_2025_12_1"]
+tracing = ["dep:tracing"]
 std = []
 version_2025_12_1 = []
 version_2025_12_0 = []

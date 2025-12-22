@@ -2,19 +2,87 @@ use std::{future, net::SocketAddr, time::Duration};
 
 use esphome_native_api::esphomeapi::EspHomeApi;
 use esphome_native_api::parser::ProtoMessage;
-use esphome_native_api::proto::version_2025_12_1::{ListEntitiesButtonResponse, ListEntitiesDoneResponse};
 use esphome_native_api::proto::version_2025_12_1::{
     ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse,
     ListEntitiesSwitchResponse, SensorStateResponse,
 };
+use esphome_native_api::proto::version_2025_12_1::{
+    ListEntitiesButtonResponse, ListEntitiesDoneResponse,
+};
 use log::{LevelFilter, debug, info};
+use opentelemetry::KeyValue;
+use opentelemetry::trace::TracerProvider;
+// use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_otlp::SpanExporter;
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_semantic_conventions::{SCHEMA_URL, attribute::SERVICE_VERSION};
 use tokio::{net::TcpSocket, signal, time::sleep};
+use tracing_core::Level;
+use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+// Construct TracerProvider for OpenTelemetryLayer
+fn init_tracer_provider() -> SdkTracerProvider {
+    let exporter = SpanExporter::builder().with_http().build().unwrap();
+
+    SdkTracerProvider::builder()
+        .with_resource(resource())
+        .with_batch_exporter(exporter)
+        .build()
+}
+
+fn resource() -> Resource {
+    Resource::builder()
+        .with_service_name(env!("CARGO_PKG_NAME"))
+        .with_schema_url(
+            [KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION"))],
+            SCHEMA_URL,
+        )
+        .build()
+}
+
+fn init_tracing_subscriber() -> OtelGuard {
+    let tracer_provider = init_tracer_provider();
+
+    let tracer = tracer_provider.tracer("tracing-otel-subscriber");
+
+    tracing_subscriber::registry()
+        // The global level filter prevents the exporter network stack
+        // from reentering the globally installed OpenTelemetryLayer with
+        // its own spans while exporting, as the libraries should not use
+        // tracing levels below DEBUG. If the OpenTelemetry layer needs to
+        // trace spans and events with higher verbosity levels, consider using
+        // per-layer filtering to target the telemetry layer specifically,
+        // e.g. by target matching.
+        .with(tracing_subscriber::filter::LevelFilter::from_level(
+            Level::INFO,
+        ))
+        .with(tracing_subscriber::fmt::layer())
+        .with(OpenTelemetryLayer::new(tracer))
+        .init();
+
+    OtelGuard { tracer_provider }
+}
+
+struct OtelGuard {
+    tracer_provider: SdkTracerProvider,
+}
+
+impl Drop for OtelGuard {
+    fn drop(&mut self) {
+        if let Err(err) = self.tracer_provider.shutdown() {
+            eprintln!("{err:?}");
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     pretty_env_logger::formatted_builder()
         .filter_level(LevelFilter::Debug)
         .init();
+    let _guard = init_tracing_subscriber();
 
     let addr: SocketAddr = SocketAddr::from(([127, 0, 0, 1], 7000));
     let socket = TcpSocket::new_v4().unwrap();
@@ -71,7 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         key: 0,
                         name: "test_button".to_string(),
                         // unique_id: "test_button_unique_id".to_string(),
-                            device_id: 0,
+                        device_id: 0,
 
                         icon: "mdi:test-button-icon".to_string(),
                         disabled_by_default: false,
@@ -83,7 +151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         key: 4,
                         name: "test_light".to_string(),
                         // unique_id: "test_light_unique_id".to_string(),
-                            device_id: 0,
+                        device_id: 0,
 
                         icon: "mdi:test-light-icon".to_string(),
                         disabled_by_default: false,
@@ -102,7 +170,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         key: 2,
                         name: "test_sensor".to_string(),
                         // unique_id: "test_sensor_unique_id".to_string(),
-                            device_id: 0,
+                        device_id: 0,
 
                         icon: "mdi:test-sensor-icon".to_string(),
                         unit_of_measurement: "°C".to_string(),
@@ -119,7 +187,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         key: 1,
                         name: "test_switch".to_string(),
                         // unique_id: "test_switch_unique_id".to_string(),
-                            device_id: 0,
+                        device_id: 0,
 
                         icon: "mdi:test-switch-icon".to_string(),
                         device_class: "test_switch_device_class".to_string(),
@@ -144,13 +212,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ProtoMessage::ListEntitiesRequest(list_entities_request) => {
                                 debug!("ListEntitiesRequest: {:?}", list_entities_request);
 
-                                for sensor  in &entities {
+                                for sensor in &entities {
                                     tx_clone.send(sensor.clone()).unwrap();
                                 }
-                                tx_clone.send(ProtoMessage::ListEntitiesDoneResponse(
-                                    ListEntitiesDoneResponse {},
-                                ))
-                                .unwrap();
+                                tx_clone
+                                    .send(ProtoMessage::ListEntitiesDoneResponse(
+                                        ListEntitiesDoneResponse {},
+                                    ))
+                                    .unwrap();
                             }
                             _ => {}
                         }
@@ -158,7 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
 
                 let message = ProtoMessage::SensorStateResponse(SensorStateResponse {
-                            device_id: 0,
+                    device_id: 0,
                     key: 0,
                     state: 25.0,
                     missing_state: false,
