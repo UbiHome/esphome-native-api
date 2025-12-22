@@ -2,10 +2,12 @@ use std::{future, net::SocketAddr, time::Duration};
 
 use esphome_native_api::esphomeapi::EspHomeApi;
 use esphome_native_api::parser::ProtoMessage;
-use esphome_native_api::proto::version_2025_12_1::{ListEntitiesButtonResponse, ListEntitiesDoneResponse};
 use esphome_native_api::proto::version_2025_12_1::{
     ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse,
     ListEntitiesSwitchResponse, SensorStateResponse,
+};
+use esphome_native_api::proto::version_2025_12_1::{
+    ListEntitiesButtonResponse, ListEntitiesDoneResponse,
 };
 use log::{LevelFilter, debug, info};
 use tokio::{net::TcpSocket, signal, time::sleep};
@@ -38,7 +40,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut server = EspHomeApi::builder()
                     .api_version_major(1)
                     .api_version_minor(42)
-                    .password_opt(Option::None)
                     .encryption_key_opt(Option::None)
                     .server_info("test_server_info".to_string())
                     .name("test_device".to_string())
@@ -71,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         key: 0,
                         name: "test_button".to_string(),
                         // unique_id: "test_button_unique_id".to_string(),
-                            device_id: 0,
+                        device_id: 0,
 
                         icon: "mdi:test-button-icon".to_string(),
                         disabled_by_default: false,
@@ -83,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         key: 4,
                         name: "test_light".to_string(),
                         // unique_id: "test_light_unique_id".to_string(),
-                            device_id: 0,
+                        device_id: 0,
 
                         icon: "mdi:test-light-icon".to_string(),
                         disabled_by_default: false,
@@ -102,7 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         key: 2,
                         name: "test_sensor".to_string(),
                         // unique_id: "test_sensor_unique_id".to_string(),
-                            device_id: 0,
+                        device_id: 0,
 
                         icon: "mdi:test-sensor-icon".to_string(),
                         unit_of_measurement: "°C".to_string(),
@@ -119,7 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         key: 1,
                         name: "test_switch".to_string(),
                         // unique_id: "test_switch_unique_id".to_string(),
-                            device_id: 0,
+                        device_id: 0,
 
                         icon: "mdi:test-switch-icon".to_string(),
                         device_class: "test_switch_device_class".to_string(),
@@ -144,13 +145,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ProtoMessage::ListEntitiesRequest(list_entities_request) => {
                                 debug!("ListEntitiesRequest: {:?}", list_entities_request);
 
-                                for sensor  in &entities {
+                                for sensor in &entities {
                                     tx_clone.send(sensor.clone()).unwrap();
                                 }
-                                tx_clone.send(ProtoMessage::ListEntitiesDoneResponse(
-                                    ListEntitiesDoneResponse {},
-                                ))
-                                .unwrap();
+                                tx_clone
+                                    .send(ProtoMessage::ListEntitiesDoneResponse(
+                                        ListEntitiesDoneResponse {},
+                                    ))
+                                    .unwrap();
                             }
                             _ => {}
                         }
@@ -158,7 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
 
                 let message = ProtoMessage::SensorStateResponse(SensorStateResponse {
-                            device_id: 0,
+                    device_id: 0,
                     key: 0,
                     state: 25.0,
                     missing_state: false,
