@@ -52,9 +52,6 @@ pub(crate) enum EncryptionState {
 pub struct EspHomeApi {
     // Private fields
     #[builder(default=Arc::new(AtomicBool::new(false)))]
-    pub(crate) key_authenticated: Arc<AtomicBool>,
-
-    #[builder(default=Arc::new(AtomicBool::new(false)))]
     pub(crate) first_message_received: Arc<AtomicBool>,
 
     #[builder(default=Arc::new(AtomicBool::new(true)))]
@@ -181,7 +178,6 @@ impl EspHomeApi {
         let encrypt_cypher_clone = self.encrypt_cypher.clone();
         let decrypt_cypher_clone = self.decrypt_cypher.clone();
         let encryption_state = self.encryption_state.clone();
-        let handshake_state_clone = self.handshake_state.clone();
         let answer_messages_tx_clone = answer_messages_tx.clone();
         // let messages_tx_clone = messages_tx.clone();
         tokio::spawn(async move {
@@ -198,7 +194,6 @@ impl EspHomeApi {
         // Stage 1: Initialization
         trace!("Init Connection");
         let encryption_key = self.encryption_key.clone();
-        let key_authenticated = self.key_authenticated.clone();
 
         let mut buf = vec![0; 1024];
         let mut initialized = false;
@@ -209,7 +204,7 @@ impl EspHomeApi {
                 .expect("failed to read data from socket");
 
             if n == 0 {
-                continue;
+                break;
             }
 
             trace!("TCP Receive: {:02X?}", &buf[0..n]);
@@ -267,7 +262,6 @@ impl EspHomeApi {
                         .unwrap(),
                     );
                     cursor += 3 + len;
-                    initialized = true;
                 } else {
                     if self.encryption_key.is_none() {
                         return Err(
@@ -279,6 +273,7 @@ impl EspHomeApi {
                     match *encryption_state_changer {
                         EncryptionState::Uninitialized => {
                             trace!("Encryption State: Uninitialized");
+                            let frame = &buf[3 + 3 + 1..n];
 
                             // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
                             let mut handshake_state: HandshakeState<
@@ -301,11 +296,8 @@ impl EspHomeApi {
                                 .unwrap();
 
                             handshake_state.push_psk(&noise_psk);
-                            match handshake_state.read_message_vec(&buf[3 + 3 + 1..n]) {
-                                Ok(_) => {
-                                    let mut mutex_changer = handshake_state_clone.lock().await;
-                                    *mutex_changer = Option::Some(handshake_state);
-                                }
+                            match handshake_state.read_message_vec(frame) {
+                                Ok(_) => {}
                                 Err(e) => {
                                     match e.kind() {
                                         // TODO: Send error
@@ -356,50 +348,39 @@ impl EspHomeApi {
                                 .expect("failed to flush server hello");
 
                             *encryption_state_changer = EncryptionState::ClientHandshake;
-                            cursor += n;
-                        }
-                        EncryptionState::ClientHandshake => {
+                            // }
+                            // EncryptionState::ClientHandshake => {
                             trace!("Encryption State: ClientHandshake");
                             let out: Vec<u8>;
-                            let mut handshake_state_change = handshake_state_clone.lock().await;
 
-                            if handshake_state_change.is_none() {
-                                *encryption_state_changer = EncryptionState::Failure;
-                            } else {
-                                let handshake_state = (*handshake_state_change).as_mut().unwrap();
-
-                                out = handshake_state.write_message_vec(b"").unwrap();
-                                {
-                                    let mut encrypt_cipher_changer =
-                                        encrypt_cypher_clone.lock().await;
-                                    let mut decrypt_cipher_changer =
-                                        decrypt_cypher_clone.lock().await;
-                                    let (decrypt_cipher, encrypt_cipher) =
-                                        handshake_state.get_ciphers();
-                                    *encrypt_cipher_changer = Some(encrypt_cipher);
-                                    *decrypt_cipher_changer = Some(decrypt_cipher);
-                                }
-
-                                let mut message_handshake = vec![0];
-                                message_handshake.extend(out);
-
-                                let len_u16 = message_handshake.len() as u16;
-                                let len_bytes = len_u16.to_be_bytes();
-                                let length: Vec<u8> = vec![len_bytes[0], len_bytes[1]];
-
-                                let mut encrypted_frame = vec![1];
-                                encrypted_frame.extend(length);
-                                encrypted_frame.extend(message_handshake);
-
-                                debug!("Sending handshake: {:02X?}", &encrypted_frame);
-                                tcp_stream
-                                    .write_all(&encrypted_frame)
-                                    .await
-                                    .expect("failed to write encrypted response");
-
-                                *encryption_state_changer = EncryptionState::Initialized;
-                                initialized = true;
+                            out = handshake_state.write_message_vec(b"").unwrap();
+                            {
+                                let mut encrypt_cipher_changer = encrypt_cypher_clone.lock().await;
+                                let mut decrypt_cipher_changer = decrypt_cypher_clone.lock().await;
+                                let (decrypt_cipher, encrypt_cipher) =
+                                    handshake_state.get_ciphers();
+                                *encrypt_cipher_changer = Some(encrypt_cipher);
+                                *decrypt_cipher_changer = Some(decrypt_cipher);
                             }
+
+                            let mut message_handshake = vec![0];
+                            message_handshake.extend(out);
+
+                            let len_u16 = message_handshake.len() as u16;
+                            let len_bytes = len_u16.to_be_bytes();
+                            let length: Vec<u8> = vec![len_bytes[0], len_bytes[1]];
+
+                            let mut encrypted_frame = vec![1];
+                            encrypted_frame.extend(length);
+                            encrypted_frame.extend(message_handshake);
+
+                            debug!("Sending handshake: {:02X?}", &encrypted_frame);
+                            tcp_stream
+                                .write_all(&encrypted_frame)
+                                .await
+                                .expect("failed to write encrypted response");
+
+                            *encryption_state_changer = EncryptionState::Initialized;
                         }
                         EncryptionState::Failure => {
                             error!("Encrypted API Failure. Disconnecting.");
@@ -410,11 +391,28 @@ impl EspHomeApi {
                             disconnect = true;
                             // answer_buf = [answer_buf, failure_buffer].concat();
                         }
+                        EncryptionState::Initialized => {
+                            let len = BigEndian::read_u16(&buf[cursor + 1..cursor + 3]) as usize;
+                            let decrypted_message = &buf[cursor + 3..cursor + len + 3];
+                            {
+                                let mut decrypt_cipher_changer = decrypt_cypher_clone.lock().await;
+                                request_message = Some(
+                                    packet_encrypted::packet_to_message(
+                                        decrypted_message,
+                                        &mut *decrypt_cipher_changer.as_mut().unwrap(),
+                                    )
+                                    .unwrap(),
+                                );
+                            }
+
+                            cursor += 3 + len;
+                        }
                         _ => {
                             debug!("Wrong encryption state: {:?}", *encryption_state_changer);
                             break;
                         }
                     }
+                    cursor += n;
                 }
 
                 // Initialization Responses
@@ -425,7 +423,8 @@ impl EspHomeApi {
                             debug!("HelloRequest: {:?}", hello_request);
 
                             response_message =
-                                Some(ProtoMessage::HelloResponse(hello_response.clone()))
+                                Some(ProtoMessage::HelloResponse(hello_response.clone()));
+                            initialized = true;
                         }
                         ProtoMessage::AuthenticationRequest(connect_request) => {
                             info!("Password Authentication is not supported");
@@ -624,7 +623,6 @@ impl EspHomeApi {
                                 )
                                 .unwrap();
                             }
-                            key_authenticated.store(true, std::sync::atomic::Ordering::Relaxed);
 
                             cursor += 3 + len;
                         }
