@@ -311,32 +311,13 @@ impl EspHomeApi {
                                 }
                             }
 
-                            // Send SERVER_HELLO
-                            let mut message_server_hello: Vec<u8> = Vec::new();
+                            let message_server_hello =
+                                packet_encrypted::generate_server_hello_frame(
+                                    self.name.clone(),
+                                    self.mac.clone(),
+                                );
 
-                            let encryption_protocol: Vec<u8> = vec![1];
-                            let node_name = b"test_node";
-                            let node_mac_address = b"00:00:00:00:00:01";
-                            message_server_hello.extend(encryption_protocol);
-                            message_server_hello.extend(b"test_node");
-                            // message_server_hello.extend(self.name.as_bytes());
-                            // if let Some(mac) = self.mac.clone() {
-                            //     message_server_hello.extend(b"\0");
-                            //     message_server_hello.extend(mac.as_bytes());
-                            // }
-                            message_server_hello.extend(b"\0");
-                            message_server_hello.extend(node_mac_address);
-
-                            message_server_hello.extend(b"\0");
-
-                            let len_u16 = message_server_hello.len() as u16;
-                            let len_bytes = len_u16.to_be_bytes();
-                            let length: Vec<u8> = vec![len_bytes[0], len_bytes[1]];
-
-                            let mut hello_frame = vec![1];
-                            hello_frame.extend(length);
-                            hello_frame.extend(message_server_hello);
-
+                            let hello_frame = construct_frame(&message_server_hello, true).unwrap();
                             debug!("Sending server hello: {:02X?}", &hello_frame);
                             tcp_stream
                                 .write_all(&hello_frame)
@@ -348,8 +329,7 @@ impl EspHomeApi {
                                 .expect("failed to flush server hello");
 
                             *encryption_state_changer = EncryptionState::ClientHandshake;
-                            // }
-                            // EncryptionState::ClientHandshake => {
+
                             trace!("Encryption State: ClientHandshake");
                             let out: Vec<u8>;
 
@@ -366,13 +346,8 @@ impl EspHomeApi {
                             let mut message_handshake = vec![0];
                             message_handshake.extend(out);
 
-                            let len_u16 = message_handshake.len() as u16;
-                            let len_bytes = len_u16.to_be_bytes();
-                            let length: Vec<u8> = vec![len_bytes[0], len_bytes[1]];
-
-                            let mut encrypted_frame = vec![1];
-                            encrypted_frame.extend(length);
-                            encrypted_frame.extend(message_handshake);
+                            let encrypted_frame =
+                                construct_frame(&message_handshake, true).unwrap();
 
                             debug!("Sending handshake: {:02X?}", &encrypted_frame);
                             tcp_stream
