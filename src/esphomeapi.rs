@@ -1,3 +1,4 @@
+use crate::frame::FrameCodec;
 use crate::frame::construct_frame;
 use crate::frame::to_encrypted_frame;
 use crate::frame::to_unencrypted_frame;
@@ -32,6 +33,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
+use tokio_stream::StreamExt;
+use tokio_util::codec::FramedRead;
 use typed_builder::TypedBuilder;
 
 #[derive(Debug)]
@@ -182,22 +185,15 @@ impl EspHomeApi {
         trace!("Init Connection: Stage 1");
         let encryption_key = self.encryption_key.clone();
 
-        let mut buf = vec![0; 1024];
+        let mut buf = vec![0; 1];
         let n = tcp_stream
-            .read(&mut buf)
+            .peek(&mut buf)
             .await
             .expect("failed to read data from socket");
 
-        if n == 0 {
-            return Err("Nothing read".into());
-        }
+        trace!("TCP Peeked: {:02X?}", &buf[0..n]);
 
-        trace!("TCP Receive: {:02X?}", &buf[0..n]);
-
-        let mut cursor = 0;
-        trace!("Cursor: {:?}", &cursor);
-
-        let preamble = buf[cursor] as usize;
+        let preamble = buf[0] as usize;
 
         let first_message_received = self
             .first_message_received
@@ -237,8 +233,14 @@ impl EspHomeApi {
             if self.encryption_key.is_none() {
                 return Err("No encryption key set, but encrypted communication requested.".into());
             }
+            let decoder = FrameCodec::new(true);
+            let mut reader = FramedRead::new(tcp_stream, decoder);
 
-            let frame = &buf[3 + 3 + 1..n];
+            let frame1 = reader.next().await.unwrap().unwrap();
+            let frame2 = reader.next().await.unwrap().unwrap();
+            info!("Frame 1: {:02X?}", &frame1);
+            info!("Frame 2: {:02X?}", &frame2);
+            tcp_stream = reader.into_inner();
 
             // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
             let mut handshake_state: HandshakeState<X25519, ChaCha20Poly1305, Sha256> =
@@ -258,7 +260,8 @@ impl EspHomeApi {
                 .unwrap();
 
             handshake_state.push_psk(&noise_psk);
-            match handshake_state.read_message_vec(frame) {
+            // Ignore message type byte
+            match handshake_state.read_message_vec(&frame2[1..]) {
                 Ok(_) => {}
                 Err(e) => {
                     match e.kind() {
@@ -286,7 +289,6 @@ impl EspHomeApi {
                 .flush()
                 .await
                 .expect("failed to flush server hello");
-
             let out: Vec<u8>;
 
             out = handshake_state.write_message_vec(b"").unwrap();
@@ -308,8 +310,6 @@ impl EspHomeApi {
                 .write_all(&encrypted_frame)
                 .await
                 .expect("failed to write encrypted response");
-
-            cursor += n;
 
             // error!("Encrypted API Failure. Disconnecting.");
             // let packet =
@@ -333,7 +333,7 @@ impl EspHomeApi {
         debug!("Initialization done.");
 
         // Asynchronously wait for an inbound socket.
-        let (mut read, mut write) = tcp_stream.into_split();
+        let (read, mut write) = tcp_stream.into_split();
 
         // Write Loop
         let plaintext_communication = self.plaintext_communication.clone();
@@ -398,117 +398,75 @@ impl EspHomeApi {
         // Clone all necessary data before spawning the task
         let answer_messages_tx_clone = answer_messages_tx.clone();
         let decrypt_cypher_clone = self.decrypt_cypher.clone();
-
+        let plaintext_communication = self.plaintext_communication.clone();
         // Read Loop
         tokio::spawn(async move {
-            let mut buf = vec![0; 1024];
+            let encrypted = !plaintext_communication.load(std::sync::atomic::Ordering::Relaxed);
+            let decoder = FrameCodec::new(encrypted);
+            let mut reader = FramedRead::new(read, decoder);
 
             loop {
-                let n = read
-                    .read(&mut buf)
-                    .await
-                    .expect("failed to read data from socket");
+                let frame = reader.next().await.unwrap().unwrap();
 
-                if n == 0 {
-                    error!("Read 0 bytes, closing connection");
-                    return;
+                trace!("TCP Receive: {:02X?}", &frame);
+
+                let message;
+                if encrypted {
+                    let mut decrypt_cipher_changer = decrypt_cypher_clone.lock().await;
+                    message = packet_encrypted::packet_to_message(
+                        &frame,
+                        &mut *decrypt_cipher_changer.as_mut().unwrap(),
+                    )
+                    .unwrap();
+                } else {
+                    message = packet_plaintext::packet_to_message(&frame).unwrap();
                 }
 
-                trace!("TCP Receive: {:02X?}", &buf[0..n]);
-
-                let mut cursor = 0;
-
-                while cursor < n {
-                    // Ignore first byte
-                    // Get Length of packet
-
-                    let message;
-                    let preamble = buf[cursor] as usize;
-                    trace!("Cursor: {:?}", &cursor);
-                    // trace!("n: {:?}", &n);
-
-                    match preamble {
-                        0 => {
-                            trace!("Cleartext message");
-                            // Cleartext
-
-                            let len = buf[cursor + 1] as usize;
-                            message = packet_plaintext::packet_to_message(
-                                &buf[cursor + 2..cursor + 3 + len].to_vec(),
-                            )
+                // Authenticated Messages
+                match &message {
+                    ProtoMessage::DisconnectRequest(disconnect_request) => {
+                        debug!("DisconnectRequest: {:?}", disconnect_request);
+                        let response_message = DisconnectResponse {};
+                        answer_messages_tx_clone
+                            .send(ProtoMessage::DisconnectResponse(response_message))
                             .unwrap();
-                            cursor += 3 + len;
-                        }
-                        1 => {
-                            trace!("Encrypted message");
-
-                            let len = BigEndian::read_u16(&buf[cursor + 1..cursor + 3]) as usize;
-                            // trace!("Length: {:?}", &len);
-                            let decrypted_message = &buf[cursor + 3..cursor + len + 3];
-                            // trace!("To decrypt message: {:02X?}", &decrypted_message);
-                            {
-                                let mut decrypt_cipher_changer = decrypt_cypher_clone.lock().await;
-                                message = packet_encrypted::packet_to_message(
-                                    decrypted_message,
-                                    &mut *decrypt_cipher_changer.as_mut().unwrap(),
-                                )
-                                .unwrap();
-                            }
-
-                            cursor += 3 + len;
-                        }
-                        _ => {
-                            debug!("Marker byte invalid: {}", preamble);
-                            return;
-                        }
+                        continue;
                     }
+                    ProtoMessage::PingRequest(ping_request) => {
+                        debug!("PingRequest: {:?}", ping_request);
+                        let response_message = PingResponse {};
+                        answer_messages_tx_clone
+                            .send(ProtoMessage::PingResponse(response_message))
+                            .unwrap();
+                    }
+                    ProtoMessage::DeviceInfoRequest(device_info_request) => {
+                        debug!("DeviceInfoRequest: {:?}", device_info_request);
+                        answer_messages_tx_clone
+                            .send(ProtoMessage::DeviceInfoResponse(device_info.clone()))
+                            .unwrap();
+                    }
+                    ProtoMessage::HelloRequest(hello_request) => {
+                        debug!("HelloRequest: {:?}", hello_request);
 
-                    // Authenticated Messages
-                    match &message {
-                        ProtoMessage::DisconnectRequest(disconnect_request) => {
-                            debug!("DisconnectRequest: {:?}", disconnect_request);
-                            let response_message = DisconnectResponse {};
-                            answer_messages_tx_clone
-                                .send(ProtoMessage::DisconnectResponse(response_message))
-                                .unwrap();
-                            continue;
-                        }
-                        ProtoMessage::PingRequest(ping_request) => {
-                            debug!("PingRequest: {:?}", ping_request);
-                            let response_message = PingResponse {};
-                            answer_messages_tx_clone
-                                .send(ProtoMessage::PingResponse(response_message))
-                                .unwrap();
-                        }
-                        ProtoMessage::DeviceInfoRequest(device_info_request) => {
-                            debug!("DeviceInfoRequest: {:?}", device_info_request);
-                            answer_messages_tx_clone
-                                .send(ProtoMessage::DeviceInfoResponse(device_info.clone()))
-                                .unwrap();
-                        }
-                        ProtoMessage::HelloRequest(hello_request) => {
-                            debug!("HelloRequest: {:?}", hello_request);
-
-                            answer_messages_tx_clone
-                                .send(ProtoMessage::HelloResponse(hello_response.clone()))
-                                .unwrap();
-                        }
-                        // ProtoMessage::AuthenticationRequest(_) => {
-                        //     info!("Password Authentication is not supported");
-                        //     disconnect = true;
-                        //     // TODO: Send error
-                        //     answer_messages_tx_clone
-                        //         .send(ProtoMessage::PingResponse(response_message))
-                        //         .unwrap();
-                        //     return Err(format!(
-                        //         "First message must be HelloRequest, got {:?} instead",
-                        //         request_message
-                        //     )
-                        //     .into());
-                        // }
-                        message => {
-                            outgoing_messages_tx.send(message.clone()).unwrap();
-                        }
+                        answer_messages_tx_clone
+                            .send(ProtoMessage::HelloResponse(hello_response.clone()))
+                            .unwrap();
+                    }
+                    // ProtoMessage::AuthenticationRequest(_) => {
+                    //     info!("Password Authentication is not supported");
+                    //     disconnect = true;
+                    //     // TODO: Send error
+                    //     answer_messages_tx_clone
+                    //         .send(ProtoMessage::PingResponse(response_message))
+                    //         .unwrap();
+                    //     return Err(format!(
+                    //         "First message must be HelloRequest, got {:?} instead",
+                    //         request_message
+                    //     )
+                    //     .into());
+                    // }
+                    message => {
+                        outgoing_messages_tx.send(message.clone()).unwrap();
                     }
                 }
             }

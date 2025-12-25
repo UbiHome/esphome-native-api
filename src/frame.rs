@@ -1,5 +1,7 @@
 use crate::packet_encrypted;
 pub use crate::parser::ProtoMessage;
+use byteorder::BigEndian;
+use byteorder::ByteOrder;
 use log::info;
 use log::trace;
 use noise_rust_crypto::ChaCha20Poly1305;
@@ -53,7 +55,7 @@ use bytes::{Buf, BytesMut};
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Encoder;
 
-struct FrameCodec {
+pub struct FrameCodec {
     encrypted: bool,
     max_length: usize,
 }
@@ -83,6 +85,8 @@ impl Decoder for FrameCodec {
         }
 
         // Check encryption byte
+        let mut varint_length = 1;
+        let length: usize;
         if self.encrypted {
             if src[0] != 1 {
                 return Err(std::io::Error::new(
@@ -90,6 +94,13 @@ impl Decoder for FrameCodec {
                     "Expected encrypted frame, but got plaintext frame.",
                 ));
             }
+            varint_length = 2;
+            if src.len() < varint_length + 1 {
+                // Not enough data to read length marker.
+                return Ok(None);
+            }
+            info!("length bytes: {:?}", &src[1..3]);
+            length = BigEndian::read_u16(&src[1..3]) as usize;
         } else {
             if src[0] != 0 {
                 return Err(std::io::Error::new(
@@ -97,32 +108,30 @@ impl Decoder for FrameCodec {
                     "Expected plaintext frame, but got encrypted frame.",
                 ));
             }
+            loop {
+                if src.len() < varint_length + 1 {
+                    // Not enough data to read length marker.
+                    return Ok(None);
+                }
+                if src[varint_length] & (1 << 7) == 0 {
+                    break;
+                }
+                varint_length += 1;
+                if varint_length > 4 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "Varint length marker is too long.",
+                    ));
+                }
+            }
+            info!("Varint cursor at: {}", varint_length);
+            info!("Varint bytes: {:?}", &src[1..varint_length + 1]);
+            // Read length marker.
+            length = decode_length_delimiter(&src[1..varint_length + 1]).unwrap() as usize;
         }
-
-        let mut varint_length = 1;
-        loop {
-            if src.len() < varint_length + 1 {
-                // Not enough data to read length marker.
-                return Ok(None);
-            }
-            if src[varint_length] & (1 << 7) == 0 {
-                break;
-            }
-            varint_length += 1;
-            if varint_length > 4 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Varint length marker is too long.",
-                ));
-            }
-        }
+        info!("Frame length: {}", &length);
 
         // info!("Buffer: {:?}", src);
-        info!("Varint cursor at: {}", varint_length);
-        info!("Varint bytes: {:?}", &src[1..varint_length + 1]);
-        // Read length marker.
-        let length = decode_length_delimiter(&src[1..varint_length + 1]).unwrap() as usize;
-        info!("Frame length: {}", &length);
 
         // Already reserve space when the length is known
         if src.capacity() < 1 + varint_length + length {
@@ -204,19 +213,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn decode_frame_encrypted() {
+        let message: Vec<u8> = vec![1, 0, 1, 3];
+        let decoder = FrameCodec::new(true);
+
+        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+
+        let frame1 = reader.next().await.unwrap().unwrap();
+
+        assert!(reader.next().await.is_none());
+        assert_eq!(frame1, vec![3]);
+    }
+
+    #[tokio::test]
     #[test_log::test]
-    async fn decode_frame() {
+    async fn decode_frame_plaintext() {
         let message: Vec<u8> = vec![0, 5, 4, 3, 2, 1, 0];
         let decoder = FrameCodec::new(false);
 
         let mut reader = FramedRead::new(Cursor::new(message), decoder);
 
         let frame1 = reader.next().await.unwrap().unwrap();
-        // let frame2 = reader.next().await.unwrap().unwrap();
 
         assert!(reader.next().await.is_none());
         assert_eq!(frame1, vec![4, 3, 2, 1, 0]);
-        // assert_eq!(frame2, "World");
     }
 
     #[tokio::test]
