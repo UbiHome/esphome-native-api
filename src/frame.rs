@@ -1,12 +1,13 @@
-
 use crate::packet_encrypted;
 pub use crate::parser::ProtoMessage;
-use prost::encode_length_delimiter;
+use log::info;
+use log::trace;
 use noise_rust_crypto::ChaCha20Poly1305;
+use prost::decode_length_delimiter;
+use prost::encode_length_delimiter;
 
-
-use noise_protocol::CipherState;
 use crate::packet_plaintext::message_to_packet;
+use noise_protocol::CipherState;
 
 pub fn construct_frame(packet: &Vec<u8>, encrypted: bool) -> Result<Vec<u8>, String> {
     let preamble: Vec<u8>;
@@ -34,21 +35,259 @@ pub fn construct_frame(packet: &Vec<u8>, encrypted: bool) -> Result<Vec<u8>, Str
     Ok(answer_buf)
 }
 
-
 pub fn to_unencrypted_frame(obj: &ProtoMessage) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let packet = message_to_packet(obj)?;
 
     Ok(construct_frame(&packet, false)?)
 }
 
-pub fn to_encrypted_frame(obj: &ProtoMessage, cipher_encrypt: &mut CipherState<ChaCha20Poly1305>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+pub fn to_encrypted_frame(
+    obj: &ProtoMessage,
+    cipher_encrypt: &mut CipherState<ChaCha20Poly1305>,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let packet = packet_encrypted::message_to_packet(obj, cipher_encrypt)?;
     Ok(construct_frame(&packet, true)?)
 }
 
+use bytes::{Buf, BytesMut};
+use tokio_util::codec::Decoder;
+use tokio_util::codec::Encoder;
+
+struct FrameCodec {
+    encrypted: bool,
+    max_length: usize,
+}
+
+impl FrameCodec {
+    pub fn new(encrypted: bool) -> Self {
+        FrameCodec {
+            encrypted,
+            max_length: 8 * 1024 * 1024,
+        }
+    }
+    // pub fn new(encrypted: bool) -> Self {
+    //     FrameCodec { encrypted }
+    // }
+}
+
+impl Decoder for FrameCodec {
+    type Item = Vec<u8>;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        // Check if var uint is completely read
+
+        if src.len() < 1 {
+            // Not enough data t0o read length marker.
+            return Ok(None);
+        }
+
+        // Check encryption byte
+        if self.encrypted {
+            if src[0] != 1 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Expected encrypted frame, but got plaintext frame.",
+                ));
+            }
+        } else {
+            if src[0] != 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Expected plaintext frame, but got encrypted frame.",
+                ));
+            }
+        }
+
+        let mut varint_length = 1;
+        loop {
+            if src.len() < varint_length + 1 {
+                // Not enough data to read length marker.
+                return Ok(None);
+            }
+            if src[varint_length] & (1 << 7) == 0 {
+                break;
+            }
+            varint_length += 1;
+            if varint_length > 4 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Varint length marker is too long.",
+                ));
+            }
+        }
+
+        // info!("Buffer: {:?}", src);
+        info!("Varint cursor at: {}", varint_length);
+        info!("Varint bytes: {:?}", &src[1..varint_length + 1]);
+        // Read length marker.
+        let length = decode_length_delimiter(&src[1..varint_length + 1]).unwrap() as usize;
+        info!("Frame length: {}", &length);
+
+        // Already reserve space when the length is known
+        if src.capacity() < 1 + varint_length + length {
+            // The full string has not yet arrived.
+            //
+            // We reserve more space in the buffer. This is not strictly
+            // necessary, but is a good idea performance-wise.
+            src.reserve(1 + varint_length + length - src.len());
+        }
+
+        info!("Buffer length: {}", src.len());
+
+        if src.len() < 1 + varint_length + length {
+            // The full string has not yet arrived.
+            info!("Not enough data yet.");
+            return Ok(None);
+        }
+
+        // Use advance to modify src such that it no longer contains
+        // this frame.
+        let data_start = varint_length + 1;
+        let data = src[data_start..data_start + length].to_vec();
+        let new_cursor = 1 + varint_length + length;
+        info!("Advancing cursor to: {}", new_cursor);
+        src.advance(new_cursor);
+
+        // Convert the data to a string, or fail if it is not valid utf-8.
+        return Ok(Some(data));
+    }
+}
+
+impl Encoder<String> for FrameCodec {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: String, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        // Don't send a string if it is longer than the other end will
+        // accept.
+        if item.len() > self.max_length {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Frame of length {} is too large.", item.len()),
+            ));
+        }
+
+        // Convert the length into a byte array.
+        // The cast to u32 cannot overflow due to the length check above.
+        let len_slice = u32::to_le_bytes(item.len() as u32);
+
+        // Reserve space in the buffer.
+        dst.reserve(4 + item.len());
+
+        // Write the length and string to the buffer.
+        dst.extend_from_slice(&len_slice);
+        dst.extend_from_slice(item.as_bytes());
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+    use tokio_stream::StreamExt;
+    use tokio_util::codec::FramedRead;
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn decode_frame_size_1() {
+        let message: Vec<u8> = vec![0, 1, 4];
+        let decoder = FrameCodec::new(false);
+
+        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+
+        let frame1 = reader.next().await.unwrap().unwrap();
+        // let frame2 = reader.next().await.unwrap().unwrap();
+
+        assert!(reader.next().await.is_none());
+        assert_eq!(frame1, vec![4]);
+        // assert_eq!(frame2, "World");
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn decode_frame() {
+        let message: Vec<u8> = vec![0, 5, 4, 3, 2, 1, 0];
+        let decoder = FrameCodec::new(false);
+
+        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+
+        let frame1 = reader.next().await.unwrap().unwrap();
+        // let frame2 = reader.next().await.unwrap().unwrap();
+
+        assert!(reader.next().await.is_none());
+        assert_eq!(frame1, vec![4, 3, 2, 1, 0]);
+        // assert_eq!(frame2, "World");
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn decode_frame_multiple() {
+        let message: Vec<u8> = vec![0, 5, 4, 3, 2, 1, 0, 0, 2, b'a', b'b'];
+        let decoder = FrameCodec::new(false);
+
+        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+
+        let frame1 = reader.next().await.unwrap().unwrap();
+        let frame2 = reader.next().await.unwrap().unwrap();
+
+        assert!(reader.next().await.is_none());
+        assert_eq!(frame1, vec![4, 3, 2, 1, 0]);
+        assert_eq!(frame2, vec![b'a', b'b']);
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn decode_frame_varint_2() {
+        let message = [vec![0, 148, 2], vec![0; 276]].concat();
+        let decoder = FrameCodec::new(false);
+
+        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+
+        let frame1 = reader.next().await.unwrap().unwrap();
+
+        assert!(reader.next().await.is_none());
+        assert_eq!(frame1, vec![0; 276]);
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn decode_frame_varint_3() {
+        let message = [vec![0, 128, 128, 1], vec![0; 16384]].concat();
+        let decoder = FrameCodec::new(false);
+
+        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+
+        let frame1 = reader.next().await.unwrap().unwrap();
+
+        assert!(reader.next().await.is_none());
+        assert_eq!(frame1, vec![0; 16384]);
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn decode_frame_varint_4() {
+        let message = [vec![0, 128, 128, 128, 1], vec![0; 2097152]].concat();
+        let decoder = FrameCodec::new(false);
+
+        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+
+        let frame1 = reader.next().await.unwrap().unwrap();
+
+        assert!(reader.next().await.is_none());
+        assert_eq!(frame1, vec![0; 2097152]);
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn decode_frame_varint_5() {
+        let message = [vec![0, 128, 128, 128, 128, 1], vec![0; 268435456]].concat();
+        let decoder = FrameCodec::new(false);
+
+        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+
+        assert!(reader.next().await.unwrap().is_err());
+    }
+
     use crate::proto;
 
     // Note this useful idiom: importing names from outer (for mod tests) scope.
@@ -56,8 +295,7 @@ mod tests {
 
     #[test]
     fn hello_message_short() {
-        let hello_message = ProtoMessage::HelloResponse(
-            proto::version_2025_12_1::HelloResponse {
+        let hello_message = ProtoMessage::HelloResponse(proto::version_2025_12_1::HelloResponse {
             api_version_major: 1,
             api_version_minor: 1,
             server_info: "Test Server".to_string(),
@@ -65,16 +303,16 @@ mod tests {
         });
         let bytes = to_unencrypted_frame(&hello_message).unwrap();
         let expected_bytes: Vec<u8> = vec![
-            0, // Zero byte
+            0,  // Zero byte
             30, // Length of the message
-            2, // Message type for HelloResponse
-            8, // Field descriptor: api_version_major
-            1, // API version major
+            2,  // Message type for HelloResponse
+            8,  // Field descriptor: api_version_major
+            1,  // API version major
             16, // Field descriptor: api_version_minor
-            1, // API version minor
+            1,  // API version minor
             26, // Field descriptor: server_info
             11, // Field length
-            b'T', b'e', b's', b't', b' ', b'S', b'e', b'r', b'v',b'e', b'r',
+            b'T', b'e', b's', b't', b' ', b'S', b'e', b'r', b'v', b'e', b'r',
             34, // Field descriptor: name
             11, // Field length
             b'T', b'e', b's', b't', b' ', b'S', b'e', b'r', b'v', b'e', b'r',
@@ -84,8 +322,7 @@ mod tests {
 
     #[test]
     fn hello_message_short_encrypted() {
-        let hello_message = ProtoMessage::HelloResponse(
-            proto::version_2025_12_1::HelloResponse {
+        let hello_message = ProtoMessage::HelloResponse(proto::version_2025_12_1::HelloResponse {
             api_version_major: 1,
             api_version_minor: 1,
             server_info: "Test Server".to_string(),
@@ -95,15 +332,16 @@ mod tests {
         let mut cipher = CipherState::<ChaCha20Poly1305>::new(&key, 1);
         let bytes = to_encrypted_frame(&hello_message, &mut cipher).unwrap();
         let expected_bytes: Vec<u8> = vec![
-            1, // Preamble: encrypted
-            0, // Length
+            1,  // Preamble: encrypted
+            0,  // Length
             50, // Length
             // Encrypted message content
-            83, 7, 229, 250, 66, 254, 9, 179, 47, 152, 53, 33, 20, 42, 219, 183, 37, 236, 193, 141, 151, 211, 72, 91, 58, 43, 66, 142, 231, 254, 199, 68, 238, 115, 218, 97, 216, 136, 154, 178, 100, 72, 12, 2, 175, 160, 139, 112, 115, 123
+            83, 7, 229, 250, 66, 254, 9, 179, 47, 152, 53, 33, 20, 42, 219, 183, 37, 236, 193, 141,
+            151, 211, 72, 91, 58, 43, 66, 142, 231, 254, 199, 68, 238, 115, 218, 97, 216, 136, 154,
+            178, 100, 72, 12, 2, 175, 160, 139, 112, 115, 123,
         ];
         assert_eq!(bytes, expected_bytes);
     }
-
 
     #[test]
     fn hello_message_overall_length_varint() {
@@ -118,18 +356,18 @@ mod tests {
         });
         let bytes = to_unencrypted_frame(&hello_message).unwrap();
         let expected_bytes: Vec<u8> = vec![
-            0, // Zero byte
+            0,   // Zero byte
             128, // Length of the message
-            1, // Length of the message
-            2, // Message type for HelloResponse
-            8, // Field descriptor: api_version_major
-            1, // API version major
-            16, // Field descriptor: api_version_minor
-            1, // API version minor
-            26, // Field descriptor: server_info
-            11, // Field length
-            b'T', b'e', b's', b't', b' ', b'S', b'e', b'r', b'v',b'e', b'r',
-            34, // Field descriptor: name
+            1,   // Length of the message
+            2,   // Message type for HelloResponse
+            8,   // Field descriptor: api_version_major
+            1,   // API version major
+            16,  // Field descriptor: api_version_minor
+            1,   // API version minor
+            26,  // Field descriptor: server_info
+            11,  // Field length
+            b'T', b'e', b's', b't', b' ', b'S', b'e', b'r', b'v', b'e', b'r',
+            34,  // Field descriptor: name
             109, // Field length
             b'T', b'e', b's', b't', b' ',
         ];
@@ -147,18 +385,18 @@ mod tests {
         });
         let bytes = to_unencrypted_frame(&hello_message).unwrap();
         let expected_bytes: Vec<u8> = vec![
-            0, // Zero byte
+            0,   // Zero byte
             146, // Length of the message
-            1, // Length of the message
-            2, // Message type for HelloResponse
-            8, // Field descriptor: api_version_major
-            1, // API version major
-            16, // Field descriptor: api_version_minor
-            1, // API version minor
-            26, // Field descriptor: server_info
-            11, // Field length
-            b'T', b'e', b's', b't', b' ', b'S', b'e', b'r', b'v',b'e', b'r',
-            34, // Field descriptor: name
+            1,   // Length of the message
+            2,   // Message type for HelloResponse
+            8,   // Field descriptor: api_version_major
+            1,   // API version major
+            16,  // Field descriptor: api_version_minor
+            1,   // API version minor
+            26,  // Field descriptor: server_info
+            11,  // Field length
+            b'T', b'e', b's', b't', b' ', b'S', b'e', b'r', b'v', b'e', b'r',
+            34,  // Field descriptor: name
             127, // Field length
             b'T', b'e', b's', b't', b' ',
         ];
@@ -176,25 +414,24 @@ mod tests {
         });
         let bytes = to_unencrypted_frame(&hello_message).unwrap();
         let expected_bytes: Vec<u8> = vec![
-            0, // Zero byte
+            0,   // Zero byte
             150, // Length of the message
-            1, // Length of the message
-            2, // Message type for HelloResponse
-            8, // Field descriptor: api_version_major
-            1, // API version major
-            16, // Field descriptor: api_version_minor
-            1, // API version minor
-            26, // Field descriptor: server_info
-            11, // Field length
-            b'T', b'e', b's', b't', b' ', b'S', b'e', b'r', b'v',b'e', b'r',
-            34, // Field descriptor: name
+            1,   // Length of the message
+            2,   // Message type for HelloResponse
+            8,   // Field descriptor: api_version_major
+            1,   // API version major
+            16,  // Field descriptor: api_version_minor
+            1,   // API version minor
+            26,  // Field descriptor: server_info
+            11,  // Field length
+            b'T', b'e', b's', b't', b' ', b'S', b'e', b'r', b'v', b'e', b'r',
+            34,  // Field descriptor: name
             130, // Field length
-            1, // Field
-            b'T', b'e', b's', b't', b' '
+            1,   // Field
+            b'T', b'e', b's', b't', b' ',
         ];
         assert_eq!(bytes[0..24], expected_bytes[0..24]);
     }
-
 
     #[test]
     fn construct_frame_plaintext() {
@@ -218,7 +455,6 @@ mod tests {
         assert_eq!(frame[0..4], vec![1, 0, 5, 8]);
     }
 
-    
     #[test]
     fn construct_frame_encrypted_long() {
         let bytes = vec![8; 128];

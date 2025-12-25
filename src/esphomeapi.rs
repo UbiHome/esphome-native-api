@@ -177,286 +177,158 @@ impl EspHomeApi {
         };
         let encrypt_cypher_clone = self.encrypt_cypher.clone();
         let decrypt_cypher_clone = self.decrypt_cypher.clone();
-        let encryption_state = self.encryption_state.clone();
-        let answer_messages_tx_clone = answer_messages_tx.clone();
-        // let messages_tx_clone = messages_tx.clone();
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = answer_messages_tx_clone.closed() => {
-                    info!("CLOSED");
-                }
-                // _ = messages_tx_clone.closed() => {
-                //     info!("CLOSED");
-                // }
-            };
-        });
 
         // Stage 1: Initialization
-        trace!("Init Connection");
+        trace!("Init Connection: Stage 1");
         let encryption_key = self.encryption_key.clone();
 
         let mut buf = vec![0; 1024];
-        let mut initialized = false;
-        loop {
-            let n = tcp_stream
-                .read(&mut buf)
-                .await
-                .expect("failed to read data from socket");
+        let n = tcp_stream
+            .read(&mut buf)
+            .await
+            .expect("failed to read data from socket");
 
-            if n == 0 {
-                break;
-            }
+        if n == 0 {
+            return Err("Nothing read".into());
+        }
 
-            trace!("TCP Receive: {:02X?}", &buf[0..n]);
+        trace!("TCP Receive: {:02X?}", &buf[0..n]);
 
-            let mut cursor = 0;
-            let mut disconnect = false;
-            while cursor < n {
-                let mut answer_buf: Vec<u8> = vec![];
-                trace!("Cursor: {:?}", &cursor);
+        let mut cursor = 0;
+        trace!("Cursor: {:?}", &cursor);
 
-                let preamble = buf[cursor] as usize;
+        let preamble = buf[cursor] as usize;
 
-                let first_message_received = self
-                    .first_message_received
-                    .load(std::sync::atomic::Ordering::Relaxed);
+        let first_message_received = self
+            .first_message_received
+            .load(std::sync::atomic::Ordering::Relaxed);
 
-                if !first_message_received {
-                    match preamble {
-                        0 => {
-                            debug!("Cleartext messaging");
+        if !first_message_received {
+            match preamble {
+                0 => {
+                    debug!("Cleartext messaging");
 
-                            self.plaintext_communication
-                                .store(true, std::sync::atomic::Ordering::Relaxed);
-                        }
-                        1 => {
-                            trace!("Encrypted messaging");
-
-                            self.plaintext_communication
-                                .store(false, std::sync::atomic::Ordering::Relaxed);
-                        }
-                        _ => {
-                            debug!("Marker byte invalid: {}", preamble);
-                            break;
-                        }
-                    }
-                    self.first_message_received
+                    self.plaintext_communication
                         .store(true, std::sync::atomic::Ordering::Relaxed);
                 }
+                1 => {
+                    trace!("Encrypted messaging");
 
-                let mut request_message: Option<ProtoMessage> = None;
-                let plaintext_communication = self
-                    .plaintext_communication
-                    .load(std::sync::atomic::Ordering::Relaxed);
+                    self.plaintext_communication
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                }
+                _ => {
+                    return Err(format!("Invalid marker byte {}", preamble).into());
+                }
+            }
+            self.first_message_received
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
 
-                if plaintext_communication {
-                    if self.encryption_key.is_some() {
-                        return Err("No Plaintext communication allowed".into());
-                    }
+        let plaintext_communication = self
+            .plaintext_communication
+            .load(std::sync::atomic::Ordering::Relaxed);
 
-                    let len = buf[cursor + 1] as usize;
-                    request_message = Some(
-                        packet_plaintext::packet_to_message(
-                            &buf[cursor + 2..cursor + 3 + len].to_vec(),
-                        )
-                        .unwrap(),
-                    );
-                    cursor += 3 + len;
-                } else {
-                    if self.encryption_key.is_none() {
-                        return Err(
-                            "No encryption key set, but encrypted communication requested.".into(),
-                        );
-                    }
+        if plaintext_communication {
+            if self.encryption_key.is_some() {
+                return Err("No Plaintext communication allowed".into());
+            }
+        } else {
+            if self.encryption_key.is_none() {
+                return Err("No encryption key set, but encrypted communication requested.".into());
+            }
 
-                    let mut encryption_state_changer = encryption_state.lock().await;
-                    match *encryption_state_changer {
-                        EncryptionState::Uninitialized => {
-                            trace!("Encryption State: Uninitialized");
-                            let frame = &buf[3 + 3 + 1..n];
+            let frame = &buf[3 + 3 + 1..n];
 
-                            // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
-                            let mut handshake_state: HandshakeState<
-                                X25519,
-                                ChaCha20Poly1305,
-                                Sha256,
-                            > = HandshakeState::new(
-                                noise_nn_psk0(),
-                                false,
-                                // NEXT: This is somehow set from the first api message?
-                                b"NoiseAPIInit\0\0",
-                                None,
-                                None,
-                                None,
-                                None,
-                            );
+            // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
+            let mut handshake_state: HandshakeState<X25519, ChaCha20Poly1305, Sha256> =
+                HandshakeState::new(
+                    noise_nn_psk0(),
+                    false,
+                    // NEXT: This is somehow set from the first api message?
+                    b"NoiseAPIInit\0\0",
+                    None,
+                    None,
+                    None,
+                    None,
+                );
 
-                            let noise_psk = BASE64_STANDARD
-                                .decode(encryption_key.as_ref().unwrap())
-                                .unwrap();
+            let noise_psk = BASE64_STANDARD
+                .decode(encryption_key.as_ref().unwrap())
+                .unwrap();
 
-                            handshake_state.push_psk(&noise_psk);
-                            match handshake_state.read_message_vec(frame) {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    match e.kind() {
-                                        // TODO: Send error
-                                        ErrorKind::Decryption => {
-                                            warn!("Decryption failed: {}", e);
-                                        }
-                                        _ => {
-                                            debug!("Failed to read message: {}", e);
-                                        }
-                                    }
-                                }
-                            }
-
-                            let message_server_hello =
-                                packet_encrypted::generate_server_hello_frame(
-                                    self.name.clone(),
-                                    self.mac.clone(),
-                                );
-
-                            let hello_frame = construct_frame(&message_server_hello, true).unwrap();
-                            debug!("Sending server hello: {:02X?}", &hello_frame);
-                            tcp_stream
-                                .write_all(&hello_frame)
-                                .await
-                                .expect("failed to write encrypted response");
-                            tcp_stream
-                                .flush()
-                                .await
-                                .expect("failed to flush server hello");
-
-                            *encryption_state_changer = EncryptionState::ClientHandshake;
-
-                            trace!("Encryption State: ClientHandshake");
-                            let out: Vec<u8>;
-
-                            out = handshake_state.write_message_vec(b"").unwrap();
-                            {
-                                let mut encrypt_cipher_changer = encrypt_cypher_clone.lock().await;
-                                let mut decrypt_cipher_changer = decrypt_cypher_clone.lock().await;
-                                let (decrypt_cipher, encrypt_cipher) =
-                                    handshake_state.get_ciphers();
-                                *encrypt_cipher_changer = Some(encrypt_cipher);
-                                *decrypt_cipher_changer = Some(decrypt_cipher);
-                            }
-
-                            let mut message_handshake = vec![0];
-                            message_handshake.extend(out);
-
-                            let encrypted_frame =
-                                construct_frame(&message_handshake, true).unwrap();
-
-                            debug!("Sending handshake: {:02X?}", &encrypted_frame);
-                            tcp_stream
-                                .write_all(&encrypted_frame)
-                                .await
-                                .expect("failed to write encrypted response");
-
-                            *encryption_state_changer = EncryptionState::Initialized;
-                        }
-                        EncryptionState::Failure => {
-                            error!("Encrypted API Failure. Disconnecting.");
-                            let packet =
-                                [[1].to_vec(), "Handshake MAC failure".as_bytes().to_vec()]
-                                    .concat();
-                            answer_buf = construct_frame(&packet, true).unwrap();
-                            disconnect = true;
-                            // answer_buf = [answer_buf, failure_buffer].concat();
-                        }
-                        EncryptionState::Initialized => {
-                            let len = BigEndian::read_u16(&buf[cursor + 1..cursor + 3]) as usize;
-                            let decrypted_message = &buf[cursor + 3..cursor + len + 3];
-                            {
-                                let mut decrypt_cipher_changer = decrypt_cypher_clone.lock().await;
-                                request_message = Some(
-                                    packet_encrypted::packet_to_message(
-                                        decrypted_message,
-                                        &mut *decrypt_cipher_changer.as_mut().unwrap(),
-                                    )
-                                    .unwrap(),
-                                );
-                            }
-
-                            cursor += 3 + len;
+            handshake_state.push_psk(&noise_psk);
+            match handshake_state.read_message_vec(frame) {
+                Ok(_) => {}
+                Err(e) => {
+                    match e.kind() {
+                        // TODO: Send error
+                        ErrorKind::Decryption => {
+                            warn!("Decryption failed: {}", e);
                         }
                         _ => {
-                            debug!("Wrong encryption state: {:?}", *encryption_state_changer);
-                            break;
+                            debug!("Failed to read message: {}", e);
                         }
-                    }
-                    cursor += n;
-                }
-
-                // Initialization Responses
-                if let Some(request_message) = request_message {
-                    let mut response_message: Option<ProtoMessage> = None;
-                    match &request_message {
-                        ProtoMessage::HelloRequest(hello_request) => {
-                            debug!("HelloRequest: {:?}", hello_request);
-
-                            response_message =
-                                Some(ProtoMessage::HelloResponse(hello_response.clone()));
-                            initialized = true;
-                        }
-                        ProtoMessage::AuthenticationRequest(connect_request) => {
-                            info!("Password Authentication is not supported");
-                            disconnect = true;
-                        }
-                        ProtoMessage::DisconnectRequest(disconnect_request) => {
-                            debug!("DisconnectRequest: {:?}", disconnect_request);
-                            response_message =
-                                Some(ProtoMessage::DisconnectResponse(DisconnectResponse {}));
-                            disconnect = true;
-                        }
-                        _ => {}
-                    }
-
-                    if let Some(response_message) = response_message {
-                        debug!("Answer message: {:?}", response_message);
-                        if plaintext_communication {
-                            answer_buf =
-                                [answer_buf, to_unencrypted_frame(&response_message).unwrap()]
-                                    .concat();
-                        } else {
-                            let mut encrypt_cipher_changer = encrypt_cypher_clone.lock().await;
-                            let encrypted_frame = to_encrypted_frame(
-                                &response_message,
-                                &mut *encrypt_cipher_changer.as_mut().unwrap(),
-                            )
-                            .unwrap();
-
-                            answer_buf = [answer_buf, encrypted_frame].concat();
-                        }
-
-                        trace!("TCP Send: {:02X?}", &answer_buf);
-
-                        match tcp_stream.write_all(&answer_buf).await {
-                            Err(err) => {
-                                error!("Failed to write data to socket: {:?}", err);
-                                break;
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-
-                if disconnect {
-                    match tcp_stream.shutdown().await {
-                        Err(err) => {
-                            error!("failed to shutdown socket: {:?}", err);
-                            break;
-                        }
-                        _ => break,
                     }
                 }
             }
-            if initialized {
-                break;
+
+            let message_server_hello =
+                packet_encrypted::generate_server_hello_frame(self.name.clone(), self.mac.clone());
+
+            let hello_frame = construct_frame(&message_server_hello, true).unwrap();
+            debug!("Sending server hello: {:02X?}", &hello_frame);
+            tcp_stream
+                .write_all(&hello_frame)
+                .await
+                .expect("failed to write encrypted response");
+            tcp_stream
+                .flush()
+                .await
+                .expect("failed to flush server hello");
+
+            let out: Vec<u8>;
+
+            out = handshake_state.write_message_vec(b"").unwrap();
+            {
+                let mut encrypt_cipher_changer = encrypt_cypher_clone.lock().await;
+                let mut decrypt_cipher_changer = decrypt_cypher_clone.lock().await;
+                let (decrypt_cipher, encrypt_cipher) = handshake_state.get_ciphers();
+                *encrypt_cipher_changer = Some(encrypt_cipher);
+                *decrypt_cipher_changer = Some(decrypt_cipher);
             }
+
+            let mut message_handshake = vec![0];
+            message_handshake.extend(out);
+
+            let encrypted_frame = construct_frame(&message_handshake, true).unwrap();
+
+            debug!("Sending handshake: {:02X?}", &encrypted_frame);
+            tcp_stream
+                .write_all(&encrypted_frame)
+                .await
+                .expect("failed to write encrypted response");
+
+            cursor += n;
+
+            // error!("Encrypted API Failure. Disconnecting.");
+            // let packet =
+            //     [[1].to_vec(), "Handshake MAC failure".as_bytes().to_vec()].concat();
+            // answer_buf = construct_frame(&packet, true).unwrap();
+            // disconnect = true;
+            // answer_buf = [answer_buf, failure_buffer].concat();
         }
+
+        // let disconnect = false;
+        // if disconnect {
+        //     match tcp_stream.shutdown().await {
+        //         Err(err) => {
+        //             error!("failed to shutdown socket: {:?}", err);
+        //             return Err("Failed to shutdown socket".into());
+        //         }
+        //         _ => {}
+        //     }
+        // }
 
         debug!("Initialization done.");
 
@@ -466,7 +338,6 @@ impl EspHomeApi {
         // Write Loop
         let plaintext_communication = self.plaintext_communication.clone();
         tokio::spawn(async move {
-            let mut disconnect = false;
             loop {
                 let mut answer_buf: Vec<u8> = vec![];
                 let answer_message: ProtoMessage;
@@ -477,9 +348,6 @@ impl EspHomeApi {
                     message = answer_messages_rx.recv() => {
                         answer_message = message.unwrap();
                     }
-                    // message = messages_rx.recv() => {
-                    //     answer_message = message.unwrap();
-                    // }
                 };
 
                 debug!("Answer message: {:?}", answer_message);
@@ -497,22 +365,6 @@ impl EspHomeApi {
                     .unwrap();
 
                     answer_buf = [answer_buf, encrypted_frame].concat();
-
-                    // Error Case
-                    // let packet = [
-                    //     [1].to_vec(),
-                    //     "Only key encryption is enabled".as_bytes().to_vec(),
-                    // ]
-                    // .concat();
-                    // answer_buf = construct_frame(&packet, true).unwrap();
-                    // disconnect = true;
-                }
-
-                match answer_message {
-                    ProtoMessage::DisconnectResponse(_) => {
-                        disconnect = true;
-                    }
-                    _ => {}
                 }
 
                 trace!("TCP Send: {:02X?}", &answer_buf);
@@ -527,15 +379,18 @@ impl EspHomeApi {
 
                 write.flush().await.expect("failed to flush data to socket");
 
-                if disconnect {
-                    debug!("Disconnecting");
-                    match write.shutdown().await {
-                        Err(err) => {
-                            error!("failed to shutdown socket: {:?}", err);
-                            break;
+                match answer_message {
+                    ProtoMessage::DisconnectResponse(_) => {
+                        debug!("Disconnecting");
+                        match write.shutdown().await {
+                            Err(err) => {
+                                error!("failed to shutdown socket: {:?}", err);
+                                break;
+                            }
+                            _ => break,
                         }
-                        _ => break,
                     }
+                    _ => {}
                 }
             }
         });
@@ -555,6 +410,7 @@ impl EspHomeApi {
                     .expect("failed to read data from socket");
 
                 if n == 0 {
+                    error!("Read 0 bytes, closing connection");
                     return;
                 }
 
@@ -630,8 +486,26 @@ impl EspHomeApi {
                                 .send(ProtoMessage::DeviceInfoResponse(device_info.clone()))
                                 .unwrap();
                         }
-                        // Hide internal messages
-                        ProtoMessage::HelloRequest(_) => {}
+                        ProtoMessage::HelloRequest(hello_request) => {
+                            debug!("HelloRequest: {:?}", hello_request);
+
+                            answer_messages_tx_clone
+                                .send(ProtoMessage::HelloResponse(hello_response.clone()))
+                                .unwrap();
+                        }
+                        // ProtoMessage::AuthenticationRequest(_) => {
+                        //     info!("Password Authentication is not supported");
+                        //     disconnect = true;
+                        //     // TODO: Send error
+                        //     answer_messages_tx_clone
+                        //         .send(ProtoMessage::PingResponse(response_message))
+                        //         .unwrap();
+                        //     return Err(format!(
+                        //         "First message must be HelloRequest, got {:?} instead",
+                        //         request_message
+                        //     )
+                        //     .into());
+                        // }
                         message => {
                             outgoing_messages_tx.send(message.clone()).unwrap();
                         }
