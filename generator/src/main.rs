@@ -1,8 +1,10 @@
+use dotenv::dotenv;
 use octocrab::Octocrab;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{Seek, Write};
 use std::path::Path;
+
 const CURRENT_VERSION: &str = "2025.12.1";
 const LAST_SUPPLIED_VERSION: &str = "2025.2.1";
 
@@ -12,6 +14,7 @@ fn get_package_name(version: &str) -> String {
 
 #[tokio::main]
 async fn main() {
+    dotenv().ok(); // Read the .env file
     let mut octocrab: Octocrab = (*octocrab::instance()).clone();
     if env::var("GITHUB_TOKEN").is_ok() {
         println!("Using token");
@@ -33,61 +36,69 @@ async fn main() {
         println!("Getting release page {}", page_number);
 
         let page = repo
-        .releases()
-        .list()
-        .per_page(50)
+            .releases()
+            .list()
+            .per_page(50)
             .page(page_number)
-        .send()
-        .await
-        .unwrap();
+            .send()
+            .await
+            .unwrap();
 
-    for release in &page {
+        for release in &page {
+            print!("{}", &release.tag_name);
             if release.tag_name.contains("b") {
-            println!("Skipping {}", &release.tag_name);
-            continue;
-        }
+                println!(" => Skipped (reason: beta)");
+                continue;
+            } else {
+                println!(" => Generating");
+            }
 
-        println!("{}", &release.tag_name);
+            let package_name = get_package_name(&release.tag_name);
+            versions.push(package_name.clone());
+
             let protos_dir = generator_root_dir.join("protos").join(&release.tag_name);
             fs::create_dir_all(&protos_dir).unwrap();
 
-            let api_proto = repo
-            .get_content()
-            .path("esphome/components/api/api.proto")
-            .r#ref(release.tag_name.clone())
-            .send()
-            .await
-            .unwrap();
-
-        if let Some(item) = &api_proto.items.first() {
-            let decoded_content = item.decoded_content().unwrap();
+            // Proto file
             let file_path = protos_dir.join("api.proto");
-            fs::write(file_path, decoded_content).unwrap();
-            println!("Decoded content written to protos/api.proto");
-        } else {
-            println!("No content found in the API response.");
-        }
+            if !file_path.exists() {
+                let api_proto = repo
+                    .get_content()
+                    .path("esphome/components/api/api.proto")
+                    .r#ref(release.tag_name.clone())
+                    .send()
+                    .await
+                    .unwrap();
 
-            let api_proto_options = repo
-            .get_content()
-            .path("esphome/components/api/api_options.proto")
-            .r#ref(release.tag_name.clone())
-            .send()
-            .await
-            .unwrap();
+                if let Some(item) = &api_proto.items.first() {
+                    let decoded_content = item.decoded_content().unwrap();
+                    fs::write(file_path, decoded_content).unwrap();
+                    println!("Decoded content written to protos/api.proto");
+                } else {
+                    println!("No content found in the API response.");
+                }
+            }
 
-        if let Some(item) = &api_proto_options.items.first() {
-            let decoded_content = item.decoded_content().unwrap();
+            // Proto options file
             let file_path = protos_dir.join("api_options.proto");
-            fs::write(file_path, decoded_content).unwrap();
-            println!("Decoded content written to protos/api.proto");
-        } else {
-            println!("No content found in the API response.");
-        }
+            if !file_path.exists() {
+                let api_proto_options = repo
+                    .get_content()
+                    .path("esphome/components/api/api_options.proto")
+                    .r#ref(release.tag_name.clone())
+                    .send()
+                    .await
+                    .unwrap();
 
-        let package_name = get_package_name(&release.tag_name);
+                if let Some(item) = &api_proto_options.items.first() {
+                    let decoded_content = item.decoded_content().unwrap();
+                    fs::write(file_path, decoded_content).unwrap();
+                    println!("Decoded content written to protos/api_options.proto");
+                } else {
+                    println!("No content found in the API response.");
+                }
+            }
 
-        versions.push(package_name.clone());
             mod_file_content.push_str(&format!(
                 "#[cfg(feature = \"{}\")]\npub mod {};\n",
                 package_name, package_name
@@ -95,20 +106,21 @@ async fn main() {
             let write_dir = root_output_dir.join(&package_name);
             fs::create_dir_all(&write_dir).unwrap();
 
-        let mut config = prost_build::Config::new();
-        // config.skip_debug(&["."]);
-        config.default_package_filename(&package_name);
+            let mut config = prost_build::Config::new();
+            // config.skip_debug(&["."]);
+            config.default_package_filename(&package_name);
             config.out_dir(&write_dir);
-        config.include_file("mod.rs");
+            config.include_file("mod.rs");
             config
                 .compile_protos(&[protos_dir.join("api.proto")], &[protos_dir])
                 .unwrap();
 
             // Only till this release:
             if release.tag_name == LAST_SUPPLIED_VERSION {
+                println!("Stopped (hit last supplied version)");
                 break 'outer;
             }
-    }
+        }
 
         page_number += 1;
     }
@@ -127,7 +139,7 @@ async fn main() {
 
     let mut file = OpenOptions::new().write(true).open(&cargo_toml).unwrap();
     file.seek(std::io::SeekFrom::Start(pos.try_into().unwrap()))
-    .unwrap();
+        .unwrap();
     writeln!(file, "[features]").unwrap();
     let default_feature_flag = get_package_name(CURRENT_VERSION);
     writeln!(file, "default = [\"std\", \"{}\"]", default_feature_flag).unwrap();

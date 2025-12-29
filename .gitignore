@@ -1,3 +1,6 @@
 target
 node_modules
 generator/protos
+
+# For generator github token
+.env
