@@ -18,6 +18,7 @@ use std::sync::atomic::AtomicBool;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use typed_builder::TypedBuilder;
 
 #[derive(TypedBuilder)]
@@ -76,8 +77,6 @@ pub struct EspHomeServer {
     bluetooth_mac_address: Option<String>,
 }
 
-
-
 impl EspHomeServer {
     /// Easier Version of the api abstraction
     /// Handles:
@@ -86,7 +85,13 @@ impl EspHomeServer {
     pub async fn start(
         &mut self,
         tcp_stream: TcpStream,
-    ) -> Result<(broadcast::Sender<ProtoMessage>, broadcast::Receiver<ProtoMessage>), Box<dyn std::error::Error>> {
+    ) -> Result<
+        (
+            mpsc::Sender<ProtoMessage>,
+            broadcast::Receiver<ProtoMessage>,
+        ),
+        Box<dyn std::error::Error>,
+    > {
         let mut server = EspHomeApi::builder()
             .api_version_major(self.api_version_major)
             .api_version_minor(self.api_version_minor)
@@ -101,7 +106,8 @@ impl EspHomeServer {
             // .suggested_area(self.suggested_area)
             .build();
         let (messages_tx, mut messages_rx) = server.start(tcp_stream).await?;
-        let (outgoing_messages_tx, mut outgoing_messages_rx) = broadcast::channel::<ProtoMessage>(16);
+        let (outgoing_messages_tx, mut outgoing_messages_rx) =
+            broadcast::channel::<ProtoMessage>(16);
         let api_components_clone = self.components_by_key.clone();
         let messages_tx_clone = messages_tx.clone();
 
@@ -118,17 +124,17 @@ impl EspHomeServer {
 
                         match message {
                             ProtoMessage::ListEntitiesRequest(list_entities_request) => {
-                            debug!("ListEntitiesRequest: {:?}", list_entities_request);
+                                debug!("ListEntitiesRequest: {:?}", list_entities_request);
 
-                            for (key, sensor) in &api_components_clone {    
-                                // TODO: Handle the different entity types
-                                // outgoing_messages_tx.send(sensor.clone()).unwrap();
-                            }
-                            outgoing_messages_tx
-                                .send(ProtoMessage::ListEntitiesDoneResponse(
-                                    ListEntitiesDoneResponse {},
-                                ))
-                                .unwrap();
+                                for (_key, _sensor) in &api_components_clone {
+                                    // TODO: Handle the different entity types
+                                    // outgoing_messages_tx.send(sensor.clone()).unwrap();
+                                }
+                                outgoing_messages_tx
+                                    .send(ProtoMessage::ListEntitiesDoneResponse(
+                                        ListEntitiesDoneResponse {},
+                                    ))
+                                    .unwrap();
                             }
                             other_message => {
                                 // Forward the message to the outgoing channel
@@ -137,13 +143,10 @@ impl EspHomeServer {
                                 }
                             }
                         }
-                        
                     },
                 );
             }
-        
         });
-
 
         Ok((messages_tx.clone(), outgoing_messages_rx))
     }
@@ -166,4 +169,3 @@ pub enum Entity {
 pub struct BinarySensor {
     pub object_id: String,
 }
-    

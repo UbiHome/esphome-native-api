@@ -147,7 +147,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             //     for n in 1..=10 {
             //     sleep(Duration::from_secs(3)).await;
             //         debug!("Sending message number {}", n);
-            //         tx.send(message.clone()).expect("Failed to send message");
+            //         tx.send(message.clone()).await.expect("Failed to send message");
             //     }
 
             //     debug!("Queue message to sent");
@@ -155,7 +155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             //     // Wait indefinitely for the interrupts
             //     let future = future::pending();
             //     let () = future.await;
-            //     tx.send(message.clone()).expect("Failed to send message");
+            //     tx.send(message.clone()).await.expect("Failed to send message");
             // });
         }
     };
