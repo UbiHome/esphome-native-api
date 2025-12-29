@@ -28,6 +28,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 use typed_builder::TypedBuilder;
@@ -130,7 +131,6 @@ impl EspHomeApi {
     /// broadcast receiver for all messages not handled by the abstraction
     pub async fn start(
         &mut self,
-        // TODO: why mutable?
         mut tcp_stream: TcpStream,
     ) -> Result<
         (
@@ -322,6 +322,7 @@ impl EspHomeApi {
 
         // Asynchronously wait for an inbound socket.
         let (read, mut write) = tcp_stream.into_split();
+        let (cancellation_write_tx, mut cancellation_write_rx) = oneshot::channel();
 
         // Write Loop
         let plaintext_communication = self.plaintext_communication.clone();
@@ -332,7 +333,11 @@ impl EspHomeApi {
 
                 // Wait for any new message
                 tokio::select! {
-                    // biased; // Poll answer_messages_rx first
+                    biased; // Poll cancellation_write_rx first
+                    msg = &mut cancellation_write_rx => {
+                        debug!("Write loop received cancellation signal ({}), exiting.", msg.unwrap());
+                        break;
+                    }
                     message = answer_messages_rx.recv() => {
                         answer_message = message.unwrap();
                     }
@@ -394,8 +399,14 @@ impl EspHomeApi {
             let mut reader = FramedRead::new(read, decoder);
 
             loop {
-                let frame = reader.next().await.unwrap().unwrap();
-
+                let next = reader.next().await;
+                if next.is_none() {
+                    info!("Read loop stopped because stream finished");
+                    // If sending fails, the write loop is probably already closed
+                    let _ = cancellation_write_tx.send("read loop finished");
+                    break;
+                }
+                let frame = next.unwrap().unwrap();
                 trace!("TCP Receive: {:02X?}", &frame);
 
                 let message;
