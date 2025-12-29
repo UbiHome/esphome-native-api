@@ -226,6 +226,8 @@ impl EspHomeApi {
 
         if plaintext_communication {
             if self.encryption_key.is_some() {
+                let encoder = FrameCodec::new(true);
+                let writer = FramedWrite::new(writer.into_inner(), encoder);
                 write_error_and_disconnect(writer, ERROR_ONLY_ENCRYPTED).await;
                 return Err(ERROR_ONLY_ENCRYPTED.into());
             }

@@ -158,7 +158,7 @@ impl Encoder<Vec<u8>> for FrameCodec {
 
         dst.extend_from_slice(&len_slice);
         dst.extend_from_slice(item.as_slice());
-        debug!("Sending server hello: {:02X?}", &dst);
+        debug!("Sending frame: {:02X?}", &dst);
         Ok(())
     }
 }
