@@ -50,7 +50,7 @@ async fn write_error_and_disconnect(
 const ERROR_ONLY_ENCRYPTED: &str = "Only key encryption is enabled";
 const ERROR_HANDSHAKE_MAC_FAILURE: &str = "Handshake MAC failure";
 
-#[derive(TypedBuilder)]
+#[derive(TypedBuilder, Clone)]
 pub struct EspHomeApi {
     // Private fields
     #[builder(default=Arc::new(AtomicBool::new(false)))]
@@ -179,6 +179,10 @@ impl EspHomeApi {
             .peek(&mut buf)
             .await
             .expect("failed to read data from socket");
+
+        if n == 0 {
+            return Err("No data".into());
+        }
 
         trace!("TCP Peeked: {:02X?}", &buf[0..n]);
 

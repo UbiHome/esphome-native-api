@@ -4,7 +4,7 @@ requires-python = ">=3.14, <4.0"
 
 [[package]]
 name = "aioesphomeapi"
-version = "43.0.0"
+version = "34.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohappyeyeballs" },
@@ -13,36 +13,9 @@ dependencies = [
     { name = "cryptography" },
     { name = "noiseprotocol" },
     { name = "protobuf" },
-    { name = "tzlocal" },
     { name = "zeroconf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/35/ec/10e47c0fce7a25709728081c7f2ec7d1ec0dbe0a738c83bb94388831e9f9/aioesphomeapi-43.0.0.tar.gz", hash = "sha256:82fc92d3d9b71c4bbf8fe0a3d0fe8ba120b78cc9153c566ce07bf43fb69037f8", size = 146266, upload-time = "2025-12-04T09:03:01.566Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/22/a0/ed469158ce960aaf2ed8580f4a5663e67f3da5749f2e75fed6269bc6ca01/aioesphomeapi-43.0.0-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:43b0f8a23cafc104b9a9a3d60b71b52c944c3fbe683a92e6d127bba0f61ce0e2", size = 504510, upload-time = "2025-12-04T09:02:14.799Z" },
-    { url = "https://files.pythonhosted.org/packages/1c/a4/29d1d4c7b37bfab74c62cf2fc0a70ae2027c5a7b8359c1251964eb231caa/aioesphomeapi-43.0.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:b724b4efb80f1af4a3b856cf1ad1edb998526d481312bb44db68ad48c8fbf78c", size = 501987, upload-time = "2025-12-04T09:02:17.085Z" },
-    { url = "https://files.pythonhosted.org/packages/65/f3/d7498e6bc45cd1c7293235a7a488b066c7223f068b5fb1c8bee78e80736e/aioesphomeapi-43.0.0-cp314-cp314-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl", hash = "sha256:b1cb31972e1fc7d4edb0e40699c881ec4d3d2bc1862e6990dfcc215cc81af11d", size = 625529, upload-time = "2025-12-04T09:02:19.288Z" },
-    { url = "https://files.pythonhosted.org/packages/18/43/e9bddaafa6825eca3afacfa96798efb16f80eb10fcb08de3e79fc90b04b9/aioesphomeapi-43.0.0-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b1578cc08cacd0b88b1178c148aef53730f3cf55b8dc4f9f90c5e82e5aafa2c0", size = 587071, upload-time = "2025-12-04T09:02:21.157Z" },
-    { url = "https://files.pythonhosted.org/packages/86/f8/8b6702b1cc8ad10505b419aba8a22260fab57c8616bc2d2aa1a6a76cf1ec/aioesphomeapi-43.0.0-cp314-cp314-manylinux2014_armv7l.manylinux_2_17_armv7l.manylinux_2_31_armv7l.whl", hash = "sha256:3d076267b00ba954e03fb36db723584ec40e44c1e0eb31fd88dc5ec7e96848ba", size = 556668, upload-time = "2025-12-04T09:02:23.248Z" },
-    { url = "https://files.pythonhosted.org/packages/bd/f2/82d840b1bb88bb37994bbb94d3b8e364bcbb8aabb8444485b1a2b876acaa/aioesphomeapi-43.0.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f0784397855c047399a0c8c50969fe0fc713655cfc3c4a19aa38f836144b8794", size = 604898, upload-time = "2025-12-04T09:02:25.251Z" },
-    { url = "https://files.pythonhosted.org/packages/62/45/1beb41f4901ecf45d19a8be9ce6fef59f1f5da94699fc829a4e4b247c5f5/aioesphomeapi-43.0.0-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:984ec726c4f3db93662a5d97b225f4adc1b19a6751ab6a15b68177db2390b408", size = 592298, upload-time = "2025-12-04T09:02:26.898Z" },
-    { url = "https://files.pythonhosted.org/packages/d3/e3/48ff6653a58d86cddaa9ff5b89c45701d3050bd04a33bcf608312fa92d19/aioesphomeapi-43.0.0-cp314-cp314-musllinux_1_2_armv7l.whl", hash = "sha256:158a2e1d75c924f4424cf249cf2a0185f24dc1c78f575987e94320ae7cc1c5c8", size = 559943, upload-time = "2025-12-04T09:02:28.666Z" },
-    { url = "https://files.pythonhosted.org/packages/b2/f9/127dfa72f35fbc6a03c5f00571f4f0365875d8d6e0be5305499695e11f6b/aioesphomeapi-43.0.0-cp314-cp314-musllinux_1_2_i686.whl", hash = "sha256:32667d7c2644d517046281c622f51c3bf9e247ffb6dcc61c921b21f6204a2c25", size = 635154, upload-time = "2025-12-04T09:02:30.371Z" },
-    { url = "https://files.pythonhosted.org/packages/b3/f9/05a4274255354736cf05ae3616ce433892a2e066d6776f29eb15856dc3d5/aioesphomeapi-43.0.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:bfebf2215d424c72d36c697fab1ff10da53a47e37a866e2244ff90b2e54d9691", size = 612661, upload-time = "2025-12-04T09:02:32.443Z" },
-    { url = "https://files.pythonhosted.org/packages/c1/e8/eb68f8fed1b7dff621758cc65d2b3b9dce4d0d91a4c11b7263496eeae5b8/aioesphomeapi-43.0.0-cp314-cp314-win32.whl", hash = "sha256:8066c86e50d1eae4be9e0ef8691927f80c157803e643feacd5e27be052698459", size = 436376, upload-time = "2025-12-04T09:02:34.237Z" },
-    { url = "https://files.pythonhosted.org/packages/f2/80/625fe8bb47fc23ed32ecfe19a49cc3d03ae16b6f7ec8267031c39d2fd5d3/aioesphomeapi-43.0.0-cp314-cp314-win_amd64.whl", hash = "sha256:dc6415162131c44a676c39c6a58da8a5e8271faa571b128370055e398ad4d77a", size = 491236, upload-time = "2025-12-04T09:02:36.25Z" },
-    { url = "https://files.pythonhosted.org/packages/9e/ca/0f860ad35af879e3cd279f9af20627df56fab84380cfb86ffcb7cabb0783/aioesphomeapi-43.0.0-cp314-cp314t-macosx_10_15_x86_64.whl", hash = "sha256:1bb50909506abd1c89fd8242f57a99330b28a8b55141512a615fca9225776662", size = 537911, upload-time = "2025-12-04T09:02:37.933Z" },
-    { url = "https://files.pythonhosted.org/packages/33/d0/468c9ea64b63747d5423a836bca10bf71fdeaaeb4a12fd7ea14a610c9a59/aioesphomeapi-43.0.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:a49e73598258aa34a69cc5057b85aa4052417cf7d47ddbc1296d4de0b8bfe3cc", size = 541667, upload-time = "2025-12-04T09:02:39.624Z" },
-    { url = "https://files.pythonhosted.org/packages/61/8a/839fd115980a9cff7613c81f6a620a911e0597e2be5a43e8629d5667e39c/aioesphomeapi-43.0.0-cp314-cp314t-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl", hash = "sha256:36425f6e672a263d3b80c15546b926225d68fbae0c9bb025e82c02c1f16aa727", size = 635195, upload-time = "2025-12-04T09:02:41.673Z" },
-    { url = "https://files.pythonhosted.org/packages/ac/b5/1d6406d7b6b2b9d7e3026144185645a790c6295c61c760677f00fa09faf0/aioesphomeapi-43.0.0-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:89f01bc3c2bfed38821ce4af92c2c673faf148366b39405742c4550aa0acf2bc", size = 609811, upload-time = "2025-12-04T09:02:43.802Z" },
-    { url = "https://files.pythonhosted.org/packages/1b/44/c70c5f3fa11750333a8e02839d1ab02a0fa05f6a4ef4b20c6415ab634a66/aioesphomeapi-43.0.0-cp314-cp314t-manylinux2014_armv7l.manylinux_2_17_armv7l.manylinux_2_31_armv7l.whl", hash = "sha256:699edac17465753188132c4453e8f7aab5a85ee39f55a531be8e085ab78fa08c", size = 560272, upload-time = "2025-12-04T09:02:45.459Z" },
-    { url = "https://files.pythonhosted.org/packages/06/05/50d4e2f8fb63108a6463e544841427bdc1ffd990ae6e5077be3ec79202e7/aioesphomeapi-43.0.0-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b9cb157271999c2ecb10fc66423d9d998f3448e64d1af6315205913e9f50712e", size = 619550, upload-time = "2025-12-04T09:02:47.351Z" },
-    { url = "https://files.pythonhosted.org/packages/98/57/d109db8d5c919bcd22973ff21b36e21e7acbfcb712c31ce6a18800387070/aioesphomeapi-43.0.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:cf94622fb366c34817978d6caf28708d1f3d3c2a57f0cb6aa2ffdec7d1347f23", size = 617171, upload-time = "2025-12-04T09:02:49.126Z" },
-    { url = "https://files.pythonhosted.org/packages/15/6f/9e5c3aef78e2354d4bde68577faca8bebecc8986999de0b835a8a2671287/aioesphomeapi-43.0.0-cp314-cp314t-musllinux_1_2_armv7l.whl", hash = "sha256:70676260787a78b6b1d7afdfbb8b5025d1687e4f7712b4b45a89c72f4928633b", size = 577650, upload-time = "2025-12-04T09:02:50.823Z" },
-    { url = "https://files.pythonhosted.org/packages/43/6c/8e69a4722fcc30a8d5508c8f932ab729910eec239fda6759ef01c7412e03/aioesphomeapi-43.0.0-cp314-cp314t-musllinux_1_2_i686.whl", hash = "sha256:cc0588fd26696791286dcad23f6502836197f737ad9589f86946302de9ff3376", size = 647401, upload-time = "2025-12-04T09:02:53.046Z" },
-    { url = "https://files.pythonhosted.org/packages/92/f6/aeaf27f02764ddb8d43f254a43f4af23662844d6aa9893667b70f666b649/aioesphomeapi-43.0.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:96149e411eb848de9a5c896f50ce2092fb3f288650c917048640ce3500b75390", size = 627568, upload-time = "2025-12-04T09:02:55.552Z" },
-    { url = "https://files.pythonhosted.org/packages/e2/29/79d889c8f327e3322a1f4b7bf2de44f6b17faa848bec1acaf7995a4cd0f1/aioesphomeapi-43.0.0-cp314-cp314t-win32.whl", hash = "sha256:0496b949eb6c0c23768c157c3b102541ef5c327948cb5689f28a14527b071eec", size = 508155, upload-time = "2025-12-04T09:02:57.671Z" },
-    { url = "https://files.pythonhosted.org/packages/df/ca/900a4cd677fad27214f4d4100da8f19e13468f1f61c9930a151c35b4442e/aioesphomeapi-43.0.0-cp314-cp314t-win_amd64.whl", hash = "sha256:c741b1630b47196c7c41dd20457b37d8ae007d487c7b2f57b24b80e33277ff22", size = 579420, upload-time = "2025-12-04T09:02:59.889Z" },
-]
+sdist = { url = "https://files.pythonhosted.org/packages/de/da/87a2c6ceaf42c114f10b7929496c6edb43f38fe3caf4b9573ab8abbea120/aioesphomeapi-34.2.0.tar.gz", hash = "sha256:b90f16bd9517cf1dcc4def8c79d5e60d1ce2a45992e3289edc36c9604dddfc35", size = 120486, upload-time = "2025-07-08T22:57:55.697Z" }
 
 [[package]]
 name = "aiohappyeyeballs"
@@ -306,31 +279,10 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aioesphomeapi", specifier = "==43.0.0" },
+    { name = "aioesphomeapi", specifier = "==34.2" },
     { name = "pytest", specifier = ">=9.0.2,<10.0.0" },
     { name = "pytest-asyncio", specifier = ">=1.3.0,<2.0.0" },
     { name = "pytest-timeout", specifier = ">=2.4.0,<3.0.0" },
-]
-
-[[package]]
-name = "tzdata"
-version = "2025.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/5e/a7/c202b344c5ca7daf398f3b8a477eeb205cf3b6f32e7ec3a6bac0629ca975/tzdata-2025.3.tar.gz", hash = "sha256:de39c2ca5dc7b0344f2eba86f49d614019d29f060fc4ebc8a417896a620b56a7", size = 196772, upload-time = "2025-12-13T17:45:35.667Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/b0/003792df09decd6849a5e39c28b513c06e84436a54440380862b5aeff25d/tzdata-2025.3-py2.py3-none-any.whl", hash = "sha256:06a47e5700f3081aab02b2e513160914ff0694bce9947d6b76ebd6bf57cfc5d1", size = 348521, upload-time = "2025-12-13T17:45:33.889Z" },
-]
-
-[[package]]
-name = "tzlocal"
-version = "5.3.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "tzdata", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/8b/2e/c14812d3d4d9cd1773c6be938f89e5735a1f11a9f184ac3639b93cef35d5/tzlocal-5.3.1.tar.gz", hash = "sha256:cceffc7edecefea1f595541dbd6e990cb1ea3d19bf01b2809f362a03dd7921fd", size = 30761, upload-time = "2025-03-05T21:17:41.549Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c2/14/e2a54fabd4f08cd7af1c07030603c3356b74da07f7cc056e600436edfa17/tzlocal-5.3.1-py3-none-any.whl", hash = "sha256:eb1a66c3ef5847adf7a834f1be0800581b683b5608e74f86ecbcef8ab91bb85d", size = 18026, upload-time = "2025-03-05T21:17:39.857Z" },
 ]
 
 [[package]]
