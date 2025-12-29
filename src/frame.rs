@@ -127,7 +127,7 @@ impl Decoder for FrameCodec {
             info!("Varint cursor at: {}", varint_length);
             info!("Varint bytes: {:?}", &src[1..varint_length + 1]);
             // Read length marker.
-            length = decode_length_delimiter(&src[1..varint_length + 1]).unwrap() as usize;
+            length = decode_length_delimiter(&src[1..varint_length + 1]).unwrap() as usize + 1; // Add one extra byte for the packet type (which is not included in the frame length).
         }
         info!("Frame length: {}", &length);
 
@@ -150,11 +150,12 @@ impl Decoder for FrameCodec {
             return Ok(None);
         }
 
-        // Use advance to modify src such that it no longer contains
-        // this frame.
+        // Get complete data from buffer
         let data_start = varint_length + 1;
         let data = src[data_start..data_start + length].to_vec();
         let new_cursor = 1 + varint_length + length;
+
+        // Use advance to modify src such that it no longer contains this frame.
         info!("Advancing cursor to: {}", new_cursor);
         src.advance(new_cursor);
 
@@ -199,17 +200,29 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn decode_frame_size_1() {
-        let message: Vec<u8> = vec![0, 1, 4];
+        let message: Vec<u8> = vec![0, 1, 4, 3];
         let decoder = FrameCodec::new(false);
 
         let mut reader = FramedRead::new(Cursor::new(message), decoder);
 
         let frame1 = reader.next().await.unwrap().unwrap();
-        // let frame2 = reader.next().await.unwrap().unwrap();
 
         assert!(reader.next().await.is_none());
-        assert_eq!(frame1, vec![4]);
-        // assert_eq!(frame2, "World");
+        assert_eq!(frame1, vec![4, 3]);
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn decode_frame_size_0() {
+        let message: Vec<u8> = vec![0, 0, 1];
+        let decoder = FrameCodec::new(false);
+
+        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+
+        let frame1 = reader.next().await.unwrap().unwrap();
+
+        assert!(reader.next().await.is_none());
+        assert_eq!(frame1, vec![1]);
     }
 
     #[tokio::test]
@@ -228,21 +241,30 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn decode_frame_plaintext() {
-        let message: Vec<u8> = vec![0, 5, 4, 3, 2, 1, 0];
+        let message: Vec<u8> = vec![
+            0x00, 0x13, 0x01, 0x0a, 0x0d, 0x61, 0x69, 0x6f, 0x65, 0x73, 0x70, 0x68, 0x6f, 0x6d,
+            0x65, 0x61, 0x70, 0x69, 0x10, 0x01, 0x18, 0x0a,
+        ];
         let decoder = FrameCodec::new(false);
 
         let mut reader = FramedRead::new(Cursor::new(message), decoder);
 
         let frame1 = reader.next().await.unwrap().unwrap();
 
+        assert_eq!(
+            frame1,
+            vec![
+                0x01, 0x0a, 0x0d, 0x61, 0x69, 0x6f, 0x65, 0x73, 0x70, 0x68, 0x6f, 0x6d, 0x65, 0x61,
+                0x70, 0x69, 0x10, 0x01, 0x18, 0x0a,
+            ]
+        );
         assert!(reader.next().await.is_none());
-        assert_eq!(frame1, vec![4, 3, 2, 1, 0]);
     }
 
     #[tokio::test]
     #[test_log::test]
     async fn decode_frame_multiple() {
-        let message: Vec<u8> = vec![0, 5, 4, 3, 2, 1, 0, 0, 2, b'a', b'b'];
+        let message: Vec<u8> = vec![0, 5, 1, 4, 3, 2, 1, 0, 0, 2, b'a', b'b', b'c'];
         let decoder = FrameCodec::new(false);
 
         let mut reader = FramedRead::new(Cursor::new(message), decoder);
@@ -251,14 +273,14 @@ mod tests {
         let frame2 = reader.next().await.unwrap().unwrap();
 
         assert!(reader.next().await.is_none());
-        assert_eq!(frame1, vec![4, 3, 2, 1, 0]);
-        assert_eq!(frame2, vec![b'a', b'b']);
+        assert_eq!(frame1, vec![1, 4, 3, 2, 1, 0]);
+        assert_eq!(frame2, vec![b'a', b'b', b'c']);
     }
 
     #[tokio::test]
     #[test_log::test]
     async fn decode_frame_varint_2() {
-        let message = [vec![0, 148, 2], vec![0; 276]].concat();
+        let message = [vec![0, 148, 2], vec![0; 277]].concat();
         let decoder = FrameCodec::new(false);
 
         let mut reader = FramedRead::new(Cursor::new(message), decoder);
@@ -266,13 +288,13 @@ mod tests {
         let frame1 = reader.next().await.unwrap().unwrap();
 
         assert!(reader.next().await.is_none());
-        assert_eq!(frame1, vec![0; 276]);
+        assert_eq!(frame1, vec![0; 277]);
     }
 
     #[tokio::test]
     #[test_log::test]
     async fn decode_frame_varint_3() {
-        let message = [vec![0, 128, 128, 1], vec![0; 16384]].concat();
+        let message = [vec![0, 128, 128, 1], vec![0; 16385]].concat();
         let decoder = FrameCodec::new(false);
 
         let mut reader = FramedRead::new(Cursor::new(message), decoder);
@@ -280,13 +302,13 @@ mod tests {
         let frame1 = reader.next().await.unwrap().unwrap();
 
         assert!(reader.next().await.is_none());
-        assert_eq!(frame1, vec![0; 16384]);
+        assert_eq!(frame1, vec![0; 16385]);
     }
 
     #[tokio::test]
     #[test_log::test]
     async fn decode_frame_varint_4() {
-        let message = [vec![0, 128, 128, 128, 1], vec![0; 2097152]].concat();
+        let message = [vec![0, 128, 128, 128, 1], vec![0; 2097153]].concat();
         let decoder = FrameCodec::new(false);
 
         let mut reader = FramedRead::new(Cursor::new(message), decoder);
@@ -294,13 +316,13 @@ mod tests {
         let frame1 = reader.next().await.unwrap().unwrap();
 
         assert!(reader.next().await.is_none());
-        assert_eq!(frame1, vec![0; 2097152]);
+        assert_eq!(frame1, vec![0; 2097153]);
     }
 
     #[tokio::test]
     #[test_log::test]
     async fn decode_frame_varint_5() {
-        let message = [vec![0, 128, 128, 128, 128, 1], vec![0; 268435456]].concat();
+        let message = [vec![0, 128, 128, 128, 128, 1], vec![0; 268435457]].concat();
         let decoder = FrameCodec::new(false);
 
         let mut reader = FramedRead::new(Cursor::new(message), decoder);
