@@ -33,19 +33,23 @@ packet-beta
 
 ```mermaid
 sequenceDiagram
-    Client->>Server: HandshakeRequest *Zero Byte encrypted*
+    Client->>Server: HandshakeHello *Zero Byte encrypted*
     Server->>Client: Custom Server Hello
+    Client->>Server: HandshakeRequest *Zero Byte encrypted*
     Server->>Client: HandshakeResponse *Zero Byte encrypted*
-    Server->>Client: Encrypted HelloResponse
 
-    loop Keep Alive Messaging
+    loop Normal Messaging
         Client->>Server: PingRequest
         Server->>Client: PingResponse
     end
 
 ```
 
-1. Handshake Request is send by the client (which is just a zero byte encrypted message)
+1. Client Sends (both at once for some reason)
+
+- NoiseHello: `\x01\x00\x00` (a zero byte message with the encryption preamble set)
+- HandshakeRequest is send by the client (which is just a zero byte encrypted message)
+
 2. The Server responds with a Custom Server Hello message:
 
 ```mermaid
@@ -75,7 +79,7 @@ packet-beta
 | Delimiter   | Y + 1     | Zero Byte Delimiter                                                   | `0x00`                   |
 
 3. It then send a Handshake Response, which is also a zero byte encrypted message.
-4. Finally, the server sends an encrypted HelloResponse message.
+4. Normal protocol messaging begins (e.g. `HelloRequest`).
 
 Notes:
 

@@ -1,11 +1,11 @@
+#![allow(dead_code)]
+
 use crate::esphomeapi::EspHomeApi;
 use crate::parser::ProtoMessage;
 
 use crate::proto::version_2025_12_1::ListEntitiesDoneResponse;
 use log::debug;
 use log::error;
-use log::info;
-use log::trace;
 use noise_protocol::CipherState;
 use noise_protocol::HandshakeState;
 use noise_rust_crypto::ChaCha20Poly1305;
@@ -106,10 +106,9 @@ impl EspHomeServer {
             // .suggested_area(self.suggested_area)
             .build();
         let (messages_tx, mut messages_rx) = server.start(tcp_stream).await?;
-        let (outgoing_messages_tx, mut outgoing_messages_rx) =
-            broadcast::channel::<ProtoMessage>(16);
+        let (outgoing_messages_tx, outgoing_messages_rx) = broadcast::channel::<ProtoMessage>(16);
         let api_components_clone = self.components_by_key.clone();
-        let messages_tx_clone = messages_tx.clone();
+        // let messages_tx_clone = messages_tx.clone();
 
         tokio::spawn(async move {
             loop {

@@ -47,7 +47,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut server = EspHomeApi::builder()
                     .api_version_major(1)
                     .api_version_minor(42)
-                    .password_opt(Option::None)
                     .encryption_key_opt(Option::None)
                     .server_info("test_server_info".to_string())
                     .name("test_device".to_string())
@@ -141,15 +140,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let (tx, mut rx) = server.start(stream).await.expect("Failed to start server");
                 let tx_clone = tx.clone();
                 debug!("Server started");
-                sleep(Duration::from_secs(3)).await;
 
                 tokio::spawn(async move {
                     loop {
-                        let message = rx.recv().await.unwrap();
+                        let message = rx.recv().await;
+                        if message.is_err() {
+                            info!("Connection closed or error: {:?}", &message);
+                            return;
+                        }
+
                         // Process the received message
                         debug!("Received message: {:?}", message);
 
-                        match message {
+                        match message.unwrap() {
                             ProtoMessage::ListEntitiesRequest(list_entities_request) => {
                                 debug!("ListEntitiesRequest: {:?}", list_entities_request);
 
@@ -163,24 +166,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     .await
                                     .unwrap();
                             }
+                            ProtoMessage::SubscribeStatesRequest(_) => {
+                                debug!("SubscribeStatesRequest received");
+                                let message =
+                                    ProtoMessage::SensorStateResponse(SensorStateResponse {
+                                        device_id: 0,
+                                        key: 0,
+                                        state: 25.0,
+                                        missing_state: false,
+                                    });
+                                tx_clone.send(message).await.unwrap();
+                            }
                             _ => {}
                         }
                     }
                 });
 
-                let message = ProtoMessage::SensorStateResponse(SensorStateResponse {
-                    device_id: 0,
-                    key: 0,
-                    state: 25.0,
-                    missing_state: false,
-                });
-                for n in 1..=10 {
-                    sleep(Duration::from_secs(3)).await;
-                    debug!("Sending message number {}", n);
-                    tx.send(message.clone())
-                        .await
-                        .expect("Failed to send message");
-                }
+                // for n in 1..=10 {
+                //     sleep(Duration::from_secs(3)).await;
+                //     debug!("Sending message number {}", n);
+                //     tx.send(message.clone())
+                //         .await
+                //         .expect("Failed to send message");
+                // }
 
                 // Wait indefinitely for the interrupts
                 let future = future::pending();

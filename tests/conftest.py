@@ -2,6 +2,8 @@ import asyncio
 from asyncio.subprocess import Process
 import os
 from pathlib import Path
+import platform
+import signal
 import socket
 from typing import Optional
 
@@ -22,7 +24,7 @@ class EspHomeTestServer:
 
     async def __aenter__(self):
         my_env = os.environ.copy()
-        my_env["RUST_LOG"] = "debug"
+        my_env["RUST_LOG"] = "trace"
         my_env["RUSTFLAGS"] = "-Awarnings"
         my_env["SERVER_PORT"] = str(self.port)
 
@@ -96,7 +98,8 @@ class EspHomeTestServer:
                 except asyncio.CancelledError:
                     pass
             # Works on windows?!
-            # os.kill(self.process.pid, signal.CTRL_BREAK_EVENT)
+            if platform.system() == "Windows":
+                os.kill(self.process.pid, signal.CTRL_BREAK_EVENT)
 
             # self.process = None
 

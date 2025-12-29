@@ -1,6 +1,6 @@
 # General
 
-The messaging protocol is based on protobuf messages. 
+The messaging protocol is based on protobuf messages.
 There is no signaling for switching between encrypted and unencrypted communication.
 
 ## Frame Format [^1]
@@ -20,11 +20,13 @@ packet-beta
 
 ```
 
-| Part     | Bits     | Description                                                                                                   | Example                  |
-| -------- | -------- | ------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| Preamble | 1        | Marker bit which states if unencrypted (`0x00`) or encrypted (`0x01`)                                         | `0x00`                   |
-| Length   | 1-5      | Variable Message Length according to [VarInt Specification](https://protobuf.dev/programming-guides/encoding/) (encrypted frames ignore the spec and always use 2 bytes)| `0x16` or `0xFFFFFFFFFF` |
-| Data     | 0-34,359,738,367 | [Encrypted](./encryption.md) or [unencrypted Packet](#packet)                                   |                          |
+| Part     | Bits             | Description                                                                                                                                                              | Example                  |
+| -------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
+| Preamble | 1                | Marker bit which states if unencrypted (`0x00`) or encrypted (`0x01`)                                                                                                    | `0x00`                   |
+| Length   | 1-5              | Variable Message Length according to [VarInt Specification](https://protobuf.dev/programming-guides/encoding/) (encrypted frames ignore the spec and always use 2 bytes) | `0x16` or `0xFFFFFFFFFF` |
+| Data     | 0-34,359,738,367 | [Encrypted](./encryption.md) or [unencrypted Packet](#packet)                                                                                                            |                          |
+
+> Attention: Unencrypted Frames Length is calculated without the Packet type byte!
 
 ### Packet
 
@@ -69,9 +71,6 @@ sequenceDiagram
     Api->>Client: DisconnectResponse
 
 ```
-
-
-
 
 ## Unencrypted to Encrypted Handover
 
