@@ -4,22 +4,16 @@ use crate::frame::to_encrypted_frame;
 use crate::frame::to_unencrypted_frame;
 use crate::packet_encrypted;
 use crate::packet_plaintext;
-use crate::parser;
 use crate::parser::ProtoMessage;
-use crate::proto::version_2025_12_1::AuthenticationResponse;
 use crate::proto::version_2025_12_1::DeviceInfoResponse;
 use crate::proto::version_2025_12_1::DisconnectResponse;
 use crate::proto::version_2025_12_1::HelloResponse;
 use crate::proto::version_2025_12_1::PingResponse;
 use base64::prelude::*;
-use byteorder::BigEndian;
-use byteorder::ByteOrder;
-use constant_time_eq::constant_time_eq;
 use log::debug;
 use log::error;
 use log::info;
 use log::trace;
-use log::warn;
 use noise_protocol::CipherState;
 use noise_protocol::ErrorKind;
 use noise_protocol::HandshakeState;
@@ -38,19 +32,29 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 use typed_builder::TypedBuilder;
 
-#[derive(Debug)]
-pub(crate) enum CommunicationType {
-    Plaintext,
-    Encrypted,
+async fn write_error_and_disconnect(mut tcp_stream: TcpStream, message: &str) {
+    error!("API Failure: {}. Disconnecting.", message);
+    let packet = [[1].to_vec(), message.as_bytes().to_vec()].concat();
+    let answer_buf = construct_frame(&packet, true).unwrap();
+    tcp_stream
+        .write_all(&answer_buf)
+        .await
+        .expect("failed to write encrypted response");
+    tcp_stream
+        .flush()
+        .await
+        .expect("failed to flush data to socket");
+
+    match tcp_stream.shutdown().await {
+        Err(err) => {
+            error!("failed to shutdown socket: {:?}", err);
+        }
+        _ => {}
+    }
 }
 
-#[derive(Debug)]
-pub(crate) enum EncryptionState {
-    Uninitialized,
-    ClientHandshake,
-    Initialized,
-    Failure,
-}
+const ERROR_ONLY_ENCRYPTED: &str = "Only key encryption is enabled";
+const ERROR_HANDSHAKE_MAC_FAILURE: &str = "Handshake MAC failure";
 
 #[derive(TypedBuilder)]
 pub struct EspHomeApi {
@@ -63,9 +67,6 @@ pub struct EspHomeApi {
 
     // #[builder(default=Arc::new(Mutex::new(None)))]
     // pub(crate) communication_type: Arc<Mutex<Option<CommunicationType>>>,
-    #[builder(default=Arc::new(Mutex::new(EncryptionState::Uninitialized)))]
-    pub(crate) encryption_state: Arc<Mutex<EncryptionState>>,
-
     #[builder(default=Arc::new(Mutex::new(None)), setter(skip))]
     pub(crate) handshake_state:
         Arc<Mutex<Option<HandshakeState<X25519, ChaCha20Poly1305, Sha256>>>>,
@@ -138,10 +139,8 @@ impl EspHomeApi {
         ),
         Box<dyn std::error::Error>,
     > {
-        // Channel for direct answers (prioritized when sending)
+        // Channel for messages
         let (answer_messages_tx, mut answer_messages_rx) = mpsc::channel::<ProtoMessage>(16);
-        // Channel for normal messages (e.g. state updates)
-        let (messages_tx, mut messages_rx) = mpsc::channel::<ProtoMessage>(16);
         let (outgoing_messages_tx, outgoing_messages_rx) = broadcast::channel::<ProtoMessage>(16);
 
         let device_info = DeviceInfoResponse {
@@ -227,20 +226,42 @@ impl EspHomeApi {
 
         if plaintext_communication {
             if self.encryption_key.is_some() {
-                return Err("No Plaintext communication allowed".into());
+                write_error_and_disconnect(tcp_stream, ERROR_ONLY_ENCRYPTED).await;
+                return Err(ERROR_ONLY_ENCRYPTED.into());
             }
         } else {
             if self.encryption_key.is_none() {
+                write_error_and_disconnect(tcp_stream, "No encrypted communication allowed").await;
                 return Err("No encryption key set, but encrypted communication requested.".into());
             }
-            let decoder = FrameCodec::new(true);
-            let mut reader = FramedRead::new(tcp_stream, decoder);
+            let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
 
-            let frame1 = reader.next().await.unwrap().unwrap();
-            let frame2 = reader.next().await.unwrap().unwrap();
-            info!("Frame 1: {:02X?}", &frame1);
-            info!("Frame 2: {:02X?}", &frame2);
-            tcp_stream = reader.into_inner();
+            let decoder = FrameCodec::new(true);
+            let mut reader = FramedRead::new(tcp_read, decoder);
+
+            let frame_noise_hello = reader.next().await.unwrap().unwrap();
+            trace!("Frame 1: {:02X?}", &frame_noise_hello);
+
+            let message_server_hello =
+                packet_encrypted::generate_server_hello_frame(self.name.clone(), self.mac.clone());
+
+            let hello_frame = construct_frame(&message_server_hello, true).unwrap();
+            debug!("Sending server hello: {:02X?}", &hello_frame);
+            tcp_write
+                .write_all(&hello_frame)
+                .await
+                .expect("failed to write encrypted response");
+            tcp_write
+                .flush()
+                .await
+                .expect("failed to flush server hello");
+
+            let frame_handshake_request = reader.next().await.unwrap().unwrap();
+            info!("Frame 2: {:02X?}", &frame_handshake_request);
+            tcp_read = reader.into_inner();
+            tcp_stream = tcp_read
+                .reunite(tcp_write)
+                .expect("failed to reunite tcp stream");
 
             // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
             let mut handshake_state: HandshakeState<X25519, ChaCha20Poly1305, Sha256> =
@@ -261,34 +282,19 @@ impl EspHomeApi {
 
             handshake_state.push_psk(&noise_psk);
             // Ignore message type byte
-            match handshake_state.read_message_vec(&frame2[1..]) {
+            match handshake_state.read_message_vec(&frame_handshake_request[1..]) {
                 Ok(_) => {}
-                Err(e) => {
-                    match e.kind() {
-                        // TODO: Send error
-                        ErrorKind::Decryption => {
-                            warn!("Decryption failed: {}", e);
-                        }
-                        _ => {
-                            debug!("Failed to read message: {}", e);
-                        }
+                Err(e) => match e.kind() {
+                    ErrorKind::Decryption => {
+                        write_error_and_disconnect(tcp_stream, ERROR_HANDSHAKE_MAC_FAILURE).await;
+                        return Err(ERROR_HANDSHAKE_MAC_FAILURE.into());
                     }
-                }
+                    _ => {
+                        debug!("Failed to read message: {}", e);
+                    }
+                },
             }
 
-            let message_server_hello =
-                packet_encrypted::generate_server_hello_frame(self.name.clone(), self.mac.clone());
-
-            let hello_frame = construct_frame(&message_server_hello, true).unwrap();
-            debug!("Sending server hello: {:02X?}", &hello_frame);
-            tcp_stream
-                .write_all(&hello_frame)
-                .await
-                .expect("failed to write encrypted response");
-            tcp_stream
-                .flush()
-                .await
-                .expect("failed to flush server hello");
             let out: Vec<u8>;
 
             out = handshake_state.write_message_vec(b"").unwrap();
@@ -303,32 +309,14 @@ impl EspHomeApi {
             let mut message_handshake = vec![0];
             message_handshake.extend(out);
 
-            let encrypted_frame = construct_frame(&message_handshake, true).unwrap();
+            let frame_handshake_response = construct_frame(&message_handshake, true).unwrap();
 
-            debug!("Sending handshake: {:02X?}", &encrypted_frame);
+            debug!("Sending handshake: {:02X?}", &frame_handshake_response);
             tcp_stream
-                .write_all(&encrypted_frame)
+                .write_all(&frame_handshake_response)
                 .await
                 .expect("failed to write encrypted response");
-
-            // error!("Encrypted API Failure. Disconnecting.");
-            // let packet =
-            //     [[1].to_vec(), "Handshake MAC failure".as_bytes().to_vec()].concat();
-            // answer_buf = construct_frame(&packet, true).unwrap();
-            // disconnect = true;
-            // answer_buf = [answer_buf, failure_buffer].concat();
         }
-
-        // let disconnect = false;
-        // if disconnect {
-        //     match tcp_stream.shutdown().await {
-        //         Err(err) => {
-        //             error!("failed to shutdown socket: {:?}", err);
-        //             return Err("Failed to shutdown socket".into());
-        //         }
-        //         _ => {}
-        //     }
-        // }
 
         debug!("Initialization done.");
 
@@ -456,19 +444,9 @@ impl EspHomeApi {
                             .await
                             .unwrap();
                     }
-                    // ProtoMessage::AuthenticationRequest(_) => {
-                    //     info!("Password Authentication is not supported");
-                    //     disconnect = true;
-                    //     // TODO: Send error
-                    //     answer_messages_tx_clone
-                    //         .send(ProtoMessage::PingResponse(response_message))
-                    //         .unwrap();
-                    //     return Err(format!(
-                    //         "First message must be HelloRequest, got {:?} instead",
-                    //         request_message
-                    //     )
-                    //     .into());
-                    // }
+                    ProtoMessage::AuthenticationRequest(_) => {
+                        info!("Password Authentication is not supported");
+                    }
                     message => {
                         outgoing_messages_tx.send(message.clone()).unwrap();
                     }

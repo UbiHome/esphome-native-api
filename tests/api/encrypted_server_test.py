@@ -109,11 +109,7 @@ async def test_encrypted_server(encrypted_server: EspHomeTestServer):
 async def test_do_not_allow_unauthenticated(encrypted_server: EspHomeTestServer):
     """An encrypted server should not allow unauthenticated access"""
 
-    api = aioesphomeapi.APIClient(
-        "127.0.0.1",
-        encrypted_server.port,
-        "password"
-    )
+    api = aioesphomeapi.APIClient("127.0.0.1", encrypted_server.port, "password")
 
     with pytest.raises(aioesphomeapi.core.RequiresEncryptionAPIError):
         await api.connect(login=False)
@@ -123,19 +119,17 @@ async def test_require_encryption_error(encrypted_server: EspHomeTestServer):
     """An encrypted server should not allow unauthenticated access"""
 
     api = aioesphomeapi.APIClient("127.0.0.1", encrypted_server.port, None)
-    
+
     with pytest.raises(aioesphomeapi.core.RequiresEncryptionAPIError):
         await api.connect(login=False)
 
 
-async def test_do_not_allow_password_authentication(encrypted_server: EspHomeTestServer):
+async def test_do_not_allow_password_authentication(
+    encrypted_server: EspHomeTestServer,
+):
     """An encrypted server should not allow password authentication"""
 
-    api = aioesphomeapi.APIClient(
-        "127.0.0.1",
-        encrypted_server.port,
-        "password"
-    )
+    api = aioesphomeapi.APIClient("127.0.0.1", encrypted_server.port, "password")
 
     # Test Closes connection as unauthorized request
     with pytest.raises(aioesphomeapi.core.RequiresEncryptionAPIError):
@@ -153,6 +147,7 @@ async def test_do_not_allow_wrong_key(encrypted_server: EspHomeTestServer):
         await api.connect(login=False)
 
 
+@pytest.mark.skip("Password authentication not supported anymore")
 async def test_encrypted_server_with_login(encrypted_server: EspHomeTestServer):
     """test encrypted server"""
 
@@ -201,7 +196,6 @@ async def test_encrypted_server_reconnect(encrypted_server: EspHomeTestServer):
     assert device_info.suggested_area == "Test Area"
 
     await api.disconnect()
-
 
     logging.fatal("SECOND Connect - Start")
     await api.connect(login=False)
@@ -289,7 +283,7 @@ async def test_encrypted_server_parallel(encrypted_server: EspHomeTestServer):
     await api1.disconnect()
     await api2.disconnect()
 
-@pytest.mark.skip("Working but not sure if it tests what it should be")
+
 async def test_encrypted_server_reconnect_logic(encrypted_server: EspHomeTestServer):
     """test encrypted server"""
 
