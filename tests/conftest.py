@@ -2,6 +2,7 @@ import asyncio
 from asyncio.subprocess import Process
 import os
 from pathlib import Path
+import platform
 import signal
 import socket
 from typing import Optional
@@ -96,7 +97,8 @@ class EspHomeTestServer:
                 except asyncio.CancelledError:
                     pass
             # Works on windows?!
-            os.kill(self.process.pid, signal.CTRL_BREAK_EVENT)
+            if platform.system() == "Windows":
+                os.kill(self.process.pid, signal.CTRL_BREAK_EVENT)
 
             # self.process = None
 
