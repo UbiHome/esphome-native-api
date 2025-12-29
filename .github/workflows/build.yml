@@ -23,11 +23,9 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-          
+
       - name: Generate Protobuf files
-        run: | 
-          cd generator
-          cargo run
+        run: cargo run -p generator
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

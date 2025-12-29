@@ -6,7 +6,7 @@ all: build
 # test
 src/proto/mod.rs:
 	echo generate protos
-	cd generator && cargo run
+	cargo run -p generator
 
 # Build the Cargo package
 build: src/proto/mod.rs
@@ -14,7 +14,6 @@ build: src/proto/mod.rs
 
 # Clean the build artifacts
 clean:
-	cd generator && cargo clean
 	cargo clean
 
 # Test the application
