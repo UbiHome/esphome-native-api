@@ -29,7 +29,7 @@ jobs:
           path: generator/protos
           key: protos
           restore-keys: protos
-          
+
       - name: Generate Protobuf files
         run: cargo run -p generator
         env:
@@ -97,6 +97,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: cargo_toml
+
+      - name: Lint code
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          target: ${{ matrix.platform.target }}
 
       - name: Build binary
         uses: houseabsolute/actions-rust-cross@v1
