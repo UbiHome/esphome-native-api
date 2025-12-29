@@ -24,6 +24,12 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: actions/cache@v4
+        with:
+          path: generator/protos
+          key: protos
+          restore-keys: protos
+          
       - name: Generate Protobuf files
         run: cargo run -p generator
         env:
