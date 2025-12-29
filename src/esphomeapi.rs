@@ -29,10 +29,11 @@ use noise_rust_crypto::Sha256;
 use noise_rust_crypto::X25519;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 use typed_builder::TypedBuilder;
@@ -132,17 +133,16 @@ impl EspHomeApi {
         mut tcp_stream: TcpStream,
     ) -> Result<
         (
-            broadcast::Sender<ProtoMessage>,
+            mpsc::Sender<ProtoMessage>,
             broadcast::Receiver<ProtoMessage>,
         ),
         Box<dyn std::error::Error>,
     > {
         // Channel for direct answers (prioritized when sending)
-        let (answer_messages_tx, mut answer_messages_rx) = broadcast::channel::<ProtoMessage>(16);
+        let (answer_messages_tx, mut answer_messages_rx) = mpsc::channel::<ProtoMessage>(16);
         // Channel for normal messages (e.g. state updates)
-        // let (messages_tx, mut messages_rx) = broadcast::channel::<ProtoMessage>(16);
-        let (outgoing_messages_tx, mut outgoing_messages_rx) =
-            broadcast::channel::<ProtoMessage>(16);
+        let (messages_tx, mut messages_rx) = mpsc::channel::<ProtoMessage>(16);
+        let (outgoing_messages_tx, outgoing_messages_rx) = broadcast::channel::<ProtoMessage>(16);
 
         let device_info = DeviceInfoResponse {
             api_encryption_supported: self.encryption_key.is_some(),
@@ -429,6 +429,7 @@ impl EspHomeApi {
                         let response_message = DisconnectResponse {};
                         answer_messages_tx_clone
                             .send(ProtoMessage::DisconnectResponse(response_message))
+                            .await
                             .unwrap();
                         continue;
                     }
@@ -437,12 +438,14 @@ impl EspHomeApi {
                         let response_message = PingResponse {};
                         answer_messages_tx_clone
                             .send(ProtoMessage::PingResponse(response_message))
+                            .await
                             .unwrap();
                     }
                     ProtoMessage::DeviceInfoRequest(device_info_request) => {
                         debug!("DeviceInfoRequest: {:?}", device_info_request);
                         answer_messages_tx_clone
                             .send(ProtoMessage::DeviceInfoResponse(device_info.clone()))
+                            .await
                             .unwrap();
                     }
                     ProtoMessage::HelloRequest(hello_request) => {
@@ -450,6 +453,7 @@ impl EspHomeApi {
 
                         answer_messages_tx_clone
                             .send(ProtoMessage::HelloResponse(hello_response.clone()))
+                            .await
                             .unwrap();
                     }
                     // ProtoMessage::AuthenticationRequest(_) => {

@@ -146,12 +146,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 debug!("ListEntitiesRequest: {:?}", list_entities_request);
 
                                 for sensor in &entities {
-                                    tx_clone.send(sensor.clone()).unwrap();
+                                    tx_clone.send(sensor.clone()).await.unwrap();
                                 }
                                 tx_clone
                                     .send(ProtoMessage::ListEntitiesDoneResponse(
                                         ListEntitiesDoneResponse {},
                                     ))
+                                    .await
                                     .unwrap();
                             }
                             _ => {}
@@ -168,7 +169,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 for n in 1..=10 {
                     sleep(Duration::from_secs(3)).await;
                     debug!("Sending message number {}", n);
-                    tx.send(message.clone()).expect("Failed to send message");
+                    tx.send(message.clone())
+                        .await
+                        .expect("Failed to send message");
                 }
 
                 // Wait indefinitely for the interrupts
