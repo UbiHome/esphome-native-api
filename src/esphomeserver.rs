@@ -77,11 +77,10 @@ pub struct EspHomeServer {
     bluetooth_mac_address: Option<String>,
 }
 
+/// Easier version of the API abstraction.
+///
+/// Manages entity keys internally.
 impl EspHomeServer {
-    /// Easier Version of the api abstraction
-    /// Handles:
-    /// - internal entity key management
-
     pub async fn start(
         &mut self,
         tcp_stream: TcpStream,
@@ -125,7 +124,7 @@ impl EspHomeServer {
                             ProtoMessage::ListEntitiesRequest(list_entities_request) => {
                                 debug!("ListEntitiesRequest: {:?}", list_entities_request);
 
-                                for (_key, _sensor) in &api_components_clone {
+                                for _sensor in api_components_clone.values() {
                                     // TODO: Handle the different entity types
                                     // outgoing_messages_tx.send(sensor.clone()).unwrap();
                                 }

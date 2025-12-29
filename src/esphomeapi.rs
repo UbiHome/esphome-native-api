@@ -42,11 +42,8 @@ async fn write_error_and_disconnect(
     writer.send(packet).await.unwrap();
     writer.flush().await.unwrap();
     let mut tcp_write = writer.into_inner();
-    match tcp_write.shutdown().await {
-        Err(err) => {
-            error!("failed to shutdown socket: {:?}", err);
-        }
-        _ => {}
+    if let Err(err) = tcp_write.shutdown().await {
+        error!("failed to shutdown socket: {:?}", err);
     }
 }
 
@@ -281,8 +278,7 @@ impl EspHomeApi {
                 },
             }
 
-            let out: Vec<u8>;
-            out = handshake_state.write_message_vec(b"").unwrap();
+            let out = handshake_state.write_message_vec(b"").unwrap();
             {
                 let mut encrypt_cipher_changer = encrypt_cypher_clone.lock().await;
                 let mut decrypt_cipher_changer = decrypt_cypher_clone.lock().await;
@@ -347,19 +343,16 @@ impl EspHomeApi {
                 }
                 writer.flush().await.unwrap();
 
-                match answer_message {
-                    ProtoMessage::DisconnectResponse(_) => {
-                        debug!("Disconnecting");
-                        let mut tcp_write = writer.into_inner();
-                        match tcp_write.shutdown().await {
-                            Err(err) => {
-                                error!("failed to shutdown socket: {:?}", err);
-                                break;
-                            }
-                            _ => break,
+                if matches!(answer_message, ProtoMessage::DisconnectResponse(_)) {
+                    debug!("Disconnecting");
+                    let mut tcp_write = writer.into_inner();
+                    match tcp_write.shutdown().await {
+                        Err(err) => {
+                            error!("failed to shutdown socket: {:?}", err);
+                            break;
                         }
+                        _ => break,
                     }
-                    _ => {}
                 }
             }
         });

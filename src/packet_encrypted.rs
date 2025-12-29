@@ -18,29 +18,29 @@ pub fn generate_server_hello_frame(name: String, mac: Option<String>) -> Vec<u8>
     }
     message_server_hello.extend(b"\0");
 
-    return message_server_hello;
+    message_server_hello
 }
 
 pub fn packet_to_message(
     buffer: &[u8],
     cipher_decrypt: &mut CipherState<ChaCha20Poly1305>,
 ) -> Result<ProtoMessage, Box<dyn std::error::Error>> {
-    let decrypted_message_frame = cipher_decrypt.decrypt_vec(&buffer).unwrap(); // "Error during decryption".to_string()
+    let decrypted_message_frame = cipher_decrypt.decrypt_vec(buffer).unwrap(); // "Error during decryption".to_string()
 
     let message_type = BigEndian::read_u16(&decrypted_message_frame[0..2]) as usize;
     let packet_content = &decrypted_message_frame[4..];
     debug!("Message type: {}", message_type);
     debug!("Message: {:?}", packet_content);
 
-    Ok(parser::parse_proto_message(message_type, &packet_content).unwrap())
+    Ok(parser::parse_proto_message(message_type, packet_content).unwrap())
 }
 
 pub fn message_to_packet(
     message: &ProtoMessage,
     cipher_encrypt: &mut CipherState<ChaCha20Poly1305>,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let response_content = parser::proto_to_vec(&message)?;
-    let message_type = (parser::message_to_num(&message).unwrap() as u16)
+    let response_content = parser::proto_to_vec(message)?;
+    let message_type = (parser::message_to_num(message).unwrap() as u16)
         .to_be_bytes()
         .to_vec();
     let message_length = (response_content.len() as u16).to_be_bytes().to_vec();

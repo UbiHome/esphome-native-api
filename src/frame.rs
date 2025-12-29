@@ -30,7 +30,7 @@ impl Decoder for FrameCodec {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         // Check if var uint is completely read
 
-        if src.len() < 1 {
+        if src.is_empty() {
             // Not enough data t0o read length marker.
             return Ok(None);
         }
@@ -111,7 +111,7 @@ impl Decoder for FrameCodec {
         src.advance(new_cursor);
 
         // Convert the data to a string, or fail if it is not valid utf-8.
-        return Ok(Some(data));
+        Ok(Some(data))
     }
 }
 
@@ -135,14 +135,13 @@ impl Encoder<Vec<u8>> for FrameCodec {
             ));
         }
 
-        let len_slice;
-        if self.encrypted {
-            len_slice = (length as u16).to_be_bytes().to_vec();
+        let len_slice = if self.encrypted {
+            (length as u16).to_be_bytes().to_vec()
         } else {
             let mut length_buffer: Vec<u8> = Vec::new();
             encode_length_delimiter(length, &mut length_buffer).unwrap();
-            len_slice = length_buffer;
-        }
+            length_buffer
+        };
 
         // Reserve space in the buffer.
         dst.reserve(len_slice.len() + item.len()); // Length bytes + string bytes (not length!)
