@@ -53,10 +53,11 @@ async fn main() {
                 println!(" => Generating");
             }
 
-            let package_name = get_package_name(&release.tag_name);
+            let package_version = &release.tag_name;
+            let package_name = get_package_name(package_version);
             versions.push(package_name.clone());
 
-            let protos_dir = generator_root_dir.join("protos").join(&release.tag_name);
+            let protos_dir = generator_root_dir.join("protos").join(package_version);
             fs::create_dir_all(&protos_dir).unwrap();
 
             // Proto file
@@ -65,7 +66,7 @@ async fn main() {
                 let api_proto = repo
                     .get_content()
                     .path("esphome/components/api/api.proto")
-                    .r#ref(release.tag_name.clone())
+                    .r#ref(&release.tag_name)
                     .send()
                     .await
                     .unwrap();
@@ -85,7 +86,7 @@ async fn main() {
                 let api_proto_options = repo
                     .get_content()
                     .path("esphome/components/api/api_options.proto")
-                    .r#ref(release.tag_name.clone())
+                    .r#ref(&release.tag_name)
                     .send()
                     .await
                     .unwrap();
@@ -100,7 +101,7 @@ async fn main() {
             }
 
             mod_file_content.push_str(&format!(
-                "\npub mod {package_name};\n#[cfg(feature = {package_name:?})]\npub use {package_name}::*;\n"
+                "\npub mod {package_name};\n#[cfg(feature = {package_name:?})]\npub use {package_name}::*;\n#[cfg(feature = {package_name:?})]\npub(crate) const VERSION: &str = {package_version:?};\n"
             ));
 
             let write_dir = root_output_dir.join(&package_name);
@@ -116,7 +117,7 @@ async fn main() {
                 .unwrap();
 
             // Only till this release:
-            if release.tag_name == LAST_SUPPLIED_VERSION {
+            if package_version == LAST_SUPPLIED_VERSION {
                 println!("Stopped (hit last supplied version)");
                 break 'outer;
             }
