@@ -466,6 +466,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "constant_time_eq",
+ "futures",
  "log",
  "noise-protocol",
  "noise-rust-crypto",

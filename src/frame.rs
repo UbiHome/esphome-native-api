@@ -2,6 +2,7 @@ use crate::packet_encrypted;
 pub use crate::parser::ProtoMessage;
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
+use log::debug;
 use log::info;
 use log::trace;
 use noise_rust_crypto::ChaCha20Poly1305;
@@ -9,49 +10,8 @@ use prost::decode_length_delimiter;
 use prost::encode_length_delimiter;
 
 use crate::packet_plaintext::message_to_packet;
-use noise_protocol::CipherState;
-
-pub fn construct_frame(packet: &Vec<u8>, encrypted: bool) -> Result<Vec<u8>, String> {
-    let preamble: Vec<u8>;
-    let length: Vec<u8>;
-    if encrypted {
-        preamble = vec![1]; // Encrypted identifier
-        // Packet length is the total length minus the 2 messageType bits (inside the packet)
-        length = (packet.len() as u16).to_be_bytes().to_vec();
-
-        // // Ensure the length is 2 bytes
-        // match length.len() {
-        //         1 => length.insert(0, 0),
-        //         2 => {},
-        //         _ => return Err("Length byte is invalid".to_string())
-        // }
-    } else {
-        preamble = vec![0]; // Plaintext identifier
-        let mut length_buffer: Vec<u8> = Vec::new();
-        // Packet length is the total length minus the messageType bit (inside the packet)
-        encode_length_delimiter(packet.len() - 1, &mut length_buffer).unwrap();
-        length = length_buffer;
-    }
-
-    let answer_buf: Vec<u8> = [preamble, length, packet.clone()].concat();
-    Ok(answer_buf)
-}
-
-pub fn to_unencrypted_frame(obj: &ProtoMessage) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let packet = message_to_packet(obj)?;
-
-    Ok(construct_frame(&packet, false)?)
-}
-
-pub fn to_encrypted_frame(
-    obj: &ProtoMessage,
-    cipher_encrypt: &mut CipherState<ChaCha20Poly1305>,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let packet = packet_encrypted::message_to_packet(obj, cipher_encrypt)?;
-    Ok(construct_frame(&packet, true)?)
-}
-
 use bytes::{Buf, BytesMut};
+use noise_protocol::CipherState;
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Encoder;
 
@@ -67,9 +27,6 @@ impl FrameCodec {
             max_length: 8 * 1024 * 1024,
         }
     }
-    // pub fn new(encrypted: bool) -> Self {
-    //     FrameCodec { encrypted }
-    // }
 }
 
 impl Decoder for FrameCodec {
@@ -164,12 +121,19 @@ impl Decoder for FrameCodec {
     }
 }
 
-impl Encoder<String> for FrameCodec {
+impl Encoder<Vec<u8>> for FrameCodec {
     type Error = std::io::Error;
 
-    fn encode(&mut self, item: String, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: Vec<u8>, dst: &mut BytesMut) -> Result<(), Self::Error> {
         // Don't send a string if it is longer than the other end will
         // accept.
+        let length = if self.encrypted {
+            item.len()
+        } else {
+            // For plaintext, the length does not include the message type byte
+            item.len() - 1
+        };
+
         if item.len() > self.max_length {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -177,25 +141,41 @@ impl Encoder<String> for FrameCodec {
             ));
         }
 
-        // Convert the length into a byte array.
-        // The cast to u32 cannot overflow due to the length check above.
-        let len_slice = u32::to_le_bytes(item.len() as u32);
+        let len_slice;
+        if self.encrypted {
+            len_slice = (length as u16).to_be_bytes().to_vec();
+        } else {
+            let mut length_buffer: Vec<u8> = Vec::new();
+            encode_length_delimiter(length, &mut length_buffer).unwrap();
+            len_slice = length_buffer;
+        }
 
         // Reserve space in the buffer.
-        dst.reserve(4 + item.len());
+        dst.reserve(len_slice.len() + item.len()); // Length bytes + string bytes (not length!)
 
         // Write the length and string to the buffer.
+        if self.encrypted {
+            // Encrypted identifier
+            dst.extend_from_slice(vec![1].as_slice());
+        } else {
+            // Plaintext identifier
+            dst.extend_from_slice(vec![0].as_slice());
+        }
+
         dst.extend_from_slice(&len_slice);
-        dst.extend_from_slice(item.as_bytes());
+        dst.extend_from_slice(item.as_slice());
+        debug!("Sending server hello: {:02X?}", &dst);
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use futures::sink::SinkExt;
     use std::io::Cursor;
     use tokio_stream::StreamExt;
-    use tokio_util::codec::FramedRead;
+
+    use tokio_util::codec::{FramedRead, FramedWrite};
 
     #[tokio::test]
     #[test_log::test]
@@ -335,15 +315,25 @@ mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
 
-    #[test]
-    fn hello_message_short() {
+    #[tokio::test]
+    #[test_log::test]
+    async fn hello_message_short() {
         let hello_message = ProtoMessage::HelloResponse(proto::version_2025_12_1::HelloResponse {
             api_version_major: 1,
             api_version_minor: 1,
             server_info: "Test Server".to_string(),
             name: "Test Server".to_string(),
         });
-        let bytes = to_unencrypted_frame(&hello_message).unwrap();
+        let encoder = FrameCodec::new(false);
+        let buffer = Vec::new();
+
+        let mut writer = FramedWrite::new(buffer, encoder);
+        writer
+            .send(message_to_packet(&hello_message).unwrap())
+            .await
+            .unwrap();
+
+        // let bytes = to_unencrypted_frame(&hello_message).unwrap();
         let expected_bytes: Vec<u8> = vec![
             0,  // Zero byte
             30, // Length of the message
@@ -359,11 +349,14 @@ mod tests {
             11, // Field length
             b'T', b'e', b's', b't', b' ', b'S', b'e', b'r', b'v', b'e', b'r',
         ];
-        assert_eq!(bytes, expected_bytes);
+
+        assert_eq!(writer.get_ref().as_slice(), expected_bytes);
     }
 
-    #[test]
-    fn hello_message_short_encrypted() {
+    #[tokio::test]
+    #[test_log::test]
+    async fn hello_message_short_encrypted() {
+        // Arrange
         let hello_message = ProtoMessage::HelloResponse(proto::version_2025_12_1::HelloResponse {
             api_version_major: 1,
             api_version_minor: 1,
@@ -372,7 +365,17 @@ mod tests {
         });
         let key: [u8; 32] = [0; 32];
         let mut cipher = CipherState::<ChaCha20Poly1305>::new(&key, 1);
-        let bytes = to_encrypted_frame(&hello_message, &mut cipher).unwrap();
+        let encoder = FrameCodec::new(true);
+        let buffer = Vec::new();
+        let mut writer = FramedWrite::new(buffer, encoder);
+
+        // Act
+        writer
+            .send(packet_encrypted::message_to_packet(&hello_message, &mut cipher).unwrap())
+            .await
+            .unwrap();
+
+        // Assert
         let expected_bytes: Vec<u8> = vec![
             1,  // Preamble: encrypted
             0,  // Length
@@ -382,11 +385,12 @@ mod tests {
             151, 211, 72, 91, 58, 43, 66, 142, 231, 254, 199, 68, 238, 115, 218, 97, 216, 136, 154,
             178, 100, 72, 12, 2, 175, 160, 139, 112, 115, 123,
         ];
-        assert_eq!(bytes, expected_bytes);
+        assert_eq!(writer.get_ref().as_slice(), expected_bytes);
     }
 
-    #[test]
-    fn hello_message_overall_length_varint() {
+    #[tokio::test]
+    #[test_log::test]
+    async fn hello_message_overall_length_varint() {
         // Test that varint length encoding works correctly for long strings
 
         let hello_message = ProtoMessage::HelloResponse(
@@ -396,7 +400,15 @@ mod tests {
             server_info: "Test Server".to_string(),
             name: "Test Server with a very very very very very very very very very very very very very very very very lon String".to_string(),
         });
-        let bytes = to_unencrypted_frame(&hello_message).unwrap();
+        let encoder = FrameCodec::new(false);
+        let buffer = Vec::new();
+
+        let mut writer = FramedWrite::new(buffer, encoder);
+        writer
+            .send(message_to_packet(&hello_message).unwrap())
+            .await
+            .unwrap();
+
         let expected_bytes: Vec<u8> = vec![
             0,   // Zero byte
             128, // Length of the message
@@ -413,11 +425,12 @@ mod tests {
             109, // Field length
             b'T', b'e', b's', b't', b' ',
         ];
-        assert_eq!(bytes[0..23], expected_bytes[0..23]);
+        assert_eq!(writer.get_ref().as_slice()[0..23], expected_bytes[0..23]);
     }
 
-    #[test]
-    fn hello_message_overall_length_varint_longer() {
+    #[tokio::test]
+    #[test_log::test]
+    async fn hello_message_overall_length_varint_longer() {
         let hello_message = ProtoMessage::HelloResponse(
             proto::version_2025_12_1::HelloResponse {
             api_version_major: 1,
@@ -425,7 +438,14 @@ mod tests {
             server_info: "Test Server".to_string(),
             name: "Test Server with a very very very very very very very very very very very very very very very very very very v very long String".to_string(),
         });
-        let bytes = to_unencrypted_frame(&hello_message).unwrap();
+        let encoder = FrameCodec::new(false);
+        let buffer = Vec::new();
+
+        let mut writer = FramedWrite::new(buffer, encoder);
+        writer
+            .send(message_to_packet(&hello_message).unwrap())
+            .await
+            .unwrap();
         let expected_bytes: Vec<u8> = vec![
             0,   // Zero byte
             146, // Length of the message
@@ -442,11 +462,12 @@ mod tests {
             127, // Field length
             b'T', b'e', b's', b't', b' ',
         ];
-        assert_eq!(bytes[0..23], expected_bytes[0..23]);
+        assert_eq!(writer.get_ref().as_slice()[0..23], expected_bytes[0..23]);
     }
 
-    #[test]
-    fn hello_message_longer() {
+    #[tokio::test]
+    #[test_log::test]
+    async fn hello_message_longer() {
         let hello_message: ProtoMessage = ProtoMessage::HelloResponse(
             proto::version_2025_12_1::HelloResponse {
             api_version_major: 1,
@@ -454,7 +475,14 @@ mod tests {
             server_info: "Test Server".to_string(),
             name: "Test Server with a very very very very very very very very very very very very very very very very very very very very long String".to_string(),
         });
-        let bytes = to_unencrypted_frame(&hello_message).unwrap();
+        let encoder = FrameCodec::new(false);
+        let buffer = Vec::new();
+
+        let mut writer = FramedWrite::new(buffer, encoder);
+        writer
+            .send(message_to_packet(&hello_message).unwrap())
+            .await
+            .unwrap();
         let expected_bytes: Vec<u8> = vec![
             0,   // Zero byte
             150, // Length of the message
@@ -472,36 +500,56 @@ mod tests {
             1,   // Field
             b'T', b'e', b's', b't', b' ',
         ];
-        assert_eq!(bytes[0..24], expected_bytes[0..24]);
+        assert_eq!(writer.get_ref().as_slice()[0..24], expected_bytes[0..24]);
     }
-
-    #[test]
-    fn construct_frame_plaintext() {
+    #[tokio::test]
+    #[test_log::test]
+    async fn construct_frame_plaintext() {
         let bytes = vec![8; 5];
-        let frame = construct_frame(&bytes, false).unwrap();
-        assert_eq!(frame[0..3], vec![0, 4, 8]);
+        let encoder = FrameCodec::new(false);
+        let buffer = Vec::new();
+
+        let mut writer = FramedWrite::new(buffer, encoder);
+        writer.send(bytes).await.unwrap();
+        assert_eq!(writer.get_ref().as_slice()[0..3], vec![0, 4, 8]);
     }
 
-    #[test]
-    fn construct_frame_plaintext_long() {
+    #[tokio::test]
+    #[test_log::test]
+    async fn construct_frame_plaintext_long() {
         let bytes = vec![8; 131];
-        let frame = construct_frame(&bytes, false).unwrap();
-        assert_eq!(frame[0..4], vec![0, 130, 1, 8]);
+        let encoder = FrameCodec::new(false);
+        let buffer = Vec::new();
+
+        let mut writer = FramedWrite::new(buffer, encoder);
+        writer.send(bytes).await.unwrap();
+        assert_eq!(writer.get_ref().as_slice()[0..4], vec![0, 130, 1, 8]);
     }
 
-    #[test]
-    fn construct_frame_encrypted() {
+    #[tokio::test]
+    #[test_log::test]
+    async fn construct_frame_encrypted() {
         let bytes = vec![8; 5];
+        let encoder = FrameCodec::new(true);
+        let buffer = Vec::new();
+        let mut writer = FramedWrite::new(buffer, encoder);
 
-        let frame = construct_frame(&bytes, true).unwrap();
-        assert_eq!(frame[0..4], vec![1, 0, 5, 8]);
+        // Act
+        writer.send(bytes).await.unwrap();
+        assert_eq!(writer.get_ref().as_slice()[0..4], vec![1, 0, 5, 8]);
     }
 
-    #[test]
-    fn construct_frame_encrypted_long() {
+    #[tokio::test]
+    #[test_log::test]
+    async fn construct_frame_encrypted_long() {
         let bytes = vec![8; 128];
 
-        let frame = construct_frame(&bytes, true).unwrap();
-        assert_eq!(frame[0..4], vec![1, 0, 128, 8]);
+        let encoder = FrameCodec::new(true);
+        let buffer = Vec::new();
+        let mut writer = FramedWrite::new(buffer, encoder);
+
+        // Act
+        writer.send(bytes).await.unwrap();
+        assert_eq!(writer.get_ref().as_slice()[0..4], vec![1, 0, 128, 8]);
     }
 }

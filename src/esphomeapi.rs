@@ -1,7 +1,4 @@
 use crate::frame::FrameCodec;
-use crate::frame::construct_frame;
-use crate::frame::to_encrypted_frame;
-use crate::frame::to_unencrypted_frame;
 use crate::packet_encrypted;
 use crate::packet_plaintext;
 use crate::parser::ProtoMessage;
@@ -10,6 +7,7 @@ use crate::proto::version_2025_12_1::DisconnectResponse;
 use crate::proto::version_2025_12_1::HelloResponse;
 use crate::proto::version_2025_12_1::PingResponse;
 use base64::prelude::*;
+use futures::sink::SinkExt;
 use log::debug;
 use log::error;
 use log::info;
@@ -25,28 +23,26 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
+use tokio_util::codec::FramedWrite;
 use typed_builder::TypedBuilder;
 
-async fn write_error_and_disconnect(mut tcp_stream: TcpStream, message: &str) {
+async fn write_error_and_disconnect(
+    mut writer: FramedWrite<OwnedWriteHalf, FrameCodec>,
+    message: &str,
+) {
     error!("API Failure: {}. Disconnecting.", message);
     let packet = [[1].to_vec(), message.as_bytes().to_vec()].concat();
-    let answer_buf = construct_frame(&packet, true).unwrap();
-    tcp_stream
-        .write_all(&answer_buf)
-        .await
-        .expect("failed to write encrypted response");
-    tcp_stream
-        .flush()
-        .await
-        .expect("failed to flush data to socket");
-
-    match tcp_stream.shutdown().await {
+    writer.send(packet).await.unwrap();
+    writer.flush().await.unwrap();
+    let mut tcp_write = writer.into_inner();
+    match tcp_write.shutdown().await {
         Err(err) => {
             error!("failed to shutdown socket: {:?}", err);
         }
@@ -177,6 +173,8 @@ impl EspHomeApi {
             server_info: self.server_info.clone(),
             name: self.name.clone(),
         };
+        let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
+
         let encrypt_cypher_clone = self.encrypt_cypher.clone();
         let decrypt_cypher_clone = self.decrypt_cypher.clone();
 
@@ -185,7 +183,7 @@ impl EspHomeApi {
         let encryption_key = self.encryption_key.clone();
 
         let mut buf = vec![0; 1];
-        let n = tcp_stream
+        let n = tcp_read
             .peek(&mut buf)
             .await
             .expect("failed to read data from socket");
@@ -223,21 +221,23 @@ impl EspHomeApi {
         let plaintext_communication = self
             .plaintext_communication
             .load(std::sync::atomic::Ordering::Relaxed);
+        let encrypted = !plaintext_communication;
+
+        let decoder = FrameCodec::new(encrypted);
+        let encoder = FrameCodec::new(encrypted);
+        let mut reader = FramedRead::new(tcp_read, decoder);
+        let mut writer = FramedWrite::new(tcp_write, encoder);
 
         if plaintext_communication {
             if self.encryption_key.is_some() {
-                write_error_and_disconnect(tcp_stream, ERROR_ONLY_ENCRYPTED).await;
+                write_error_and_disconnect(writer, ERROR_ONLY_ENCRYPTED).await;
                 return Err(ERROR_ONLY_ENCRYPTED.into());
             }
         } else {
             if self.encryption_key.is_none() {
-                write_error_and_disconnect(tcp_stream, "No encrypted communication allowed").await;
+                write_error_and_disconnect(writer, "No encrypted communication allowed").await;
                 return Err("No encryption key set, but encrypted communication requested.".into());
             }
-            let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
-
-            let decoder = FrameCodec::new(true);
-            let mut reader = FramedRead::new(tcp_read, decoder);
 
             let frame_noise_hello = reader.next().await.unwrap().unwrap();
             trace!("Frame 1: {:02X?}", &frame_noise_hello);
@@ -245,23 +245,11 @@ impl EspHomeApi {
             let message_server_hello =
                 packet_encrypted::generate_server_hello_frame(self.name.clone(), self.mac.clone());
 
-            let hello_frame = construct_frame(&message_server_hello, true).unwrap();
-            debug!("Sending server hello: {:02X?}", &hello_frame);
-            tcp_write
-                .write_all(&hello_frame)
-                .await
-                .expect("failed to write encrypted response");
-            tcp_write
-                .flush()
-                .await
-                .expect("failed to flush server hello");
+            writer.send(message_server_hello.clone()).await.unwrap();
+            writer.flush().await.unwrap();
 
             let frame_handshake_request = reader.next().await.unwrap().unwrap();
             info!("Frame 2: {:02X?}", &frame_handshake_request);
-            tcp_read = reader.into_inner();
-            tcp_stream = tcp_read
-                .reunite(tcp_write)
-                .expect("failed to reunite tcp stream");
 
             // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
             let mut handshake_state: HandshakeState<X25519, ChaCha20Poly1305, Sha256> =
@@ -286,7 +274,7 @@ impl EspHomeApi {
                 Ok(_) => {}
                 Err(e) => match e.kind() {
                     ErrorKind::Decryption => {
-                        write_error_and_disconnect(tcp_stream, ERROR_HANDSHAKE_MAC_FAILURE).await;
+                        write_error_and_disconnect(writer, ERROR_HANDSHAKE_MAC_FAILURE).await;
                         return Err(ERROR_HANDSHAKE_MAC_FAILURE.into());
                     }
                     _ => {
@@ -296,7 +284,6 @@ impl EspHomeApi {
             }
 
             let out: Vec<u8>;
-
             out = handshake_state.write_message_vec(b"").unwrap();
             {
                 let mut encrypt_cipher_changer = encrypt_cypher_clone.lock().await;
@@ -309,33 +296,27 @@ impl EspHomeApi {
             let mut message_handshake = vec![0];
             message_handshake.extend(out);
 
-            let frame_handshake_response = construct_frame(&message_handshake, true).unwrap();
-
-            debug!("Sending handshake: {:02X?}", &frame_handshake_response);
-            tcp_stream
-                .write_all(&frame_handshake_response)
-                .await
-                .expect("failed to write encrypted response");
+            debug!("Sending handshake");
+            writer.send(message_handshake.clone()).await.unwrap();
+            writer.flush().await.unwrap();
         }
 
         debug!("Initialization done.");
 
         // Asynchronously wait for an inbound socket.
-        let (read, mut write) = tcp_stream.into_split();
         let (cancellation_write_tx, mut cancellation_write_rx) = oneshot::channel();
 
         // Write Loop
         let plaintext_communication = self.plaintext_communication.clone();
         tokio::spawn(async move {
             loop {
-                let mut answer_buf: Vec<u8> = vec![];
                 let answer_message: ProtoMessage;
 
                 // Wait for any new message
                 tokio::select! {
                     biased; // Poll cancellation_write_rx first
-                    msg = &mut cancellation_write_rx => {
-                        debug!("Write loop received cancellation signal ({}), exiting.", msg.unwrap());
+                    cancel_message = &mut cancellation_write_rx => {
+                        debug!("Write loop received cancellation signal ({}), exiting.", cancel_message.unwrap());
                         break;
                     }
                     message = answer_messages_rx.recv() => {
@@ -346,36 +327,33 @@ impl EspHomeApi {
                 debug!("Answer message: {:?}", answer_message);
 
                 if plaintext_communication.load(std::sync::atomic::Ordering::Relaxed) {
-                    answer_buf =
-                        [answer_buf, to_unencrypted_frame(&answer_message).unwrap()].concat();
+                    writer
+                        .send(packet_plaintext::message_to_packet(&answer_message).unwrap())
+                        .await
+                        .unwrap();
+                    // answer_buf =
+                    //     [answer_buf, to_unencrypted_frame(&answer_message).unwrap()].concat();
                 } else {
                     // Use normal messaging
                     let mut encrypt_cipher_changer = encrypt_cypher_clone.lock().await;
-                    let encrypted_frame = to_encrypted_frame(
-                        &answer_message,
-                        &mut *encrypt_cipher_changer.as_mut().unwrap(),
-                    )
-                    .unwrap();
-
-                    answer_buf = [answer_buf, encrypted_frame].concat();
+                    writer
+                        .send(
+                            packet_encrypted::message_to_packet(
+                                &answer_message,
+                                &mut *encrypt_cipher_changer.as_mut().unwrap(),
+                            )
+                            .unwrap(),
+                        )
+                        .await
+                        .unwrap();
                 }
-
-                trace!("TCP Send: {:02X?}", &answer_buf);
-
-                match write.write_all(&answer_buf).await {
-                    Err(err) => {
-                        error!("Failed to write data to socket: {:?}", err);
-                        break;
-                    }
-                    _ => {}
-                }
-
-                write.flush().await.expect("failed to flush data to socket");
+                writer.flush().await.unwrap();
 
                 match answer_message {
                     ProtoMessage::DisconnectResponse(_) => {
                         debug!("Disconnecting");
-                        match write.shutdown().await {
+                        let mut tcp_write = writer.into_inner();
+                        match tcp_write.shutdown().await {
                             Err(err) => {
                                 error!("failed to shutdown socket: {:?}", err);
                                 break;
@@ -394,10 +372,6 @@ impl EspHomeApi {
         let plaintext_communication = self.plaintext_communication.clone();
         // Read Loop
         tokio::spawn(async move {
-            let encrypted = !plaintext_communication.load(std::sync::atomic::Ordering::Relaxed);
-            let decoder = FrameCodec::new(encrypted);
-            let mut reader = FramedRead::new(read, decoder);
-
             loop {
                 let next = reader.next().await;
                 if next.is_none() {
