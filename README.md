@@ -2,14 +2,12 @@
 
 ---
 
-
 # Rust Crate for the esphome Native API
 
 Implementation of the [esphome native API](https://esphome.io/components/api.html) for Rust.
 
 > This is still work in progress, so the API surface may change. But it is already quite usable. Just try the examples.
 
+> The implementation is already used by [UbiHome](https://github.com/ubihome/ubihome) to make OS based devices available to Home Assistant.
+
 While reverse engineering the "missing" documentation of the API was reconstructed: [https://ubihome.github.io/esphome-native-api/native_api/](https://ubihome.github.io/esphome-native-api/native_api/)
-
-
-
