@@ -2,22 +2,22 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://ubihome.github.io/esphome-native-api/</loc>
-         <lastmod>2025-08-04</lastmod>
+         <lastmod>2025-12-29</lastmod>
     </url>
     <url>
          <loc>https://ubihome.github.io/esphome-native-api/native_api/</loc>
-         <lastmod>2025-08-04</lastmod>
+         <lastmod>2025-12-29</lastmod>
     </url>
     <url>
          <loc>https://ubihome.github.io/esphome-native-api/native_api/bluetooth_proxy/</loc>
-         <lastmod>2025-08-04</lastmod>
+         <lastmod>2025-12-29</lastmod>
     </url>
     <url>
          <loc>https://ubihome.github.io/esphome-native-api/native_api/encryption/</loc>
-         <lastmod>2025-08-04</lastmod>
+         <lastmod>2025-12-29</lastmod>
     </url>
     <url>
          <loc>https://ubihome.github.io/esphome-native-api/native_api/general/</loc>
-         <lastmod>2025-08-04</lastmod>
+         <lastmod>2025-12-29</lastmod>
     </url>
 </urlset>
