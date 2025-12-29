@@ -1,3 +1,4 @@
+use std::env;
 use std::{future, net::SocketAddr, time::Duration};
 
 use esphome_native_api::esphomeapi::EspHomeApi;
@@ -16,8 +17,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter_level(LevelFilter::Trace)
         .init();
 
-    // let addr: SocketAddr = SocketAddr::from(([0, 0, 0, 0], 7001));
-    let addr: SocketAddr = SocketAddr::from(([127, 0, 0, 1], 7001));
+    let addr: SocketAddr = SocketAddr::from((
+        [127, 0, 0, 1],
+        env::var("SERVER_PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(6053),
+    ));
     let socket = TcpSocket::new_v4().unwrap();
     socket.set_reuseaddr(true).unwrap();
 

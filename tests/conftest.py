@@ -16,7 +16,7 @@ class EspHomeTestServer:
     _stderr_task = None
     noise_psk = "px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA="
 
-    def __init__(self, name: str = "test_server", port: int = 7000):
+    def __init__(self, name: str = "test_server", port: int = 6053):
         self.name = name
         self.port = port
 
@@ -24,8 +24,11 @@ class EspHomeTestServer:
         my_env = os.environ.copy()
         my_env["RUST_LOG"] = "debug"
         my_env["RUSTFLAGS"] = "-Awarnings"
+        my_env["SERVER_PORT"] = str(self.port)
 
-        executable = os.path.join(Path(__file__).parent, "..", f"target/debug/examples/{self.name}")
+        executable = os.path.join(
+            Path(__file__).parent, "..", f"target/debug/examples/{self.name}"
+        )
         if os.path.exists(executable) and os.environ.get("CI"):
             # Use pre-build binaries
             self.process = await asyncio.create_subprocess_exec(
@@ -35,7 +38,10 @@ class EspHomeTestServer:
         else:
             # raise Exception(executable)
             self.process = await asyncio.create_subprocess_exec(
-                "cargo", "run", "--example", self.name,
+                "cargo",
+                "run",
+                "--example",
+                self.name,
                 env=my_env,
                 cwd=os.path.join(Path(__file__).parent, ".."),
             )
@@ -46,7 +52,7 @@ class EspHomeTestServer:
         print("Waiting for server to start...")
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         while True:
-            result = sock.connect_ex(('127.0.0.1', self.port))
+            result = sock.connect_ex(("127.0.0.1", self.port))
             if result == 0:
                 print("Port is open")
                 break
@@ -103,7 +109,7 @@ class EspHomeTestServer:
             line = await self.process.stdout.readline()
             if not line:
                 break
-            message = line.decode('utf-8').rstrip()
+            message = line.decode("utf-8").rstrip()
             print(f"[SERVER] {message}")
 
     async def _read_stderr(self):
@@ -115,7 +121,7 @@ class EspHomeTestServer:
             line = await self.process.stderr.readline()
             if not line:
                 break
-            message = line.decode('utf-8').rstrip()
+            message = line.decode("utf-8").rstrip()
             print(f"[SERVER] {message}")
 
 
