@@ -100,9 +100,9 @@ async fn main() {
             }
 
             mod_file_content.push_str(&format!(
-                "#[cfg(feature = \"{}\")]\npub mod {};\n",
-                package_name, package_name
+                "\npub mod {package_name};\n#[cfg(feature = {package_name:?})]\npub use {package_name}::*;\n"
             ));
+
             let write_dir = root_output_dir.join(&package_name);
             fs::create_dir_all(&write_dir).unwrap();
 
@@ -141,8 +141,8 @@ async fn main() {
     file.seek(std::io::SeekFrom::Start(pos.try_into().unwrap()))
         .unwrap();
     writeln!(file, "[features]").unwrap();
-    let default_feature_flag = get_package_name(CURRENT_VERSION);
-    writeln!(file, "default = [\"std\", \"{}\"]", default_feature_flag).unwrap();
+    let default_package_name = get_package_name(CURRENT_VERSION);
+    writeln!(file, "default = [\"std\", \"{}\"]", default_package_name).unwrap();
     writeln!(file, "std = []").unwrap();
 
     for version in versions {
