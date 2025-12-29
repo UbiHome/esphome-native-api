@@ -7,7 +7,7 @@ use esphome_native_api::proto::version_2025_12_1::{
     ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse,
     ListEntitiesSwitchResponse, SensorStateResponse,
 };
-use esphome_native_api::proto::version_2025_12_1::{
+use esphome_native_api::proto::version_2025_12_2::{
     ListEntitiesButtonResponse, ListEntitiesDoneResponse,
 };
 use log::{LevelFilter, debug, info};

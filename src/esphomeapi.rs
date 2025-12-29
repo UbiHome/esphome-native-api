@@ -1,7 +1,7 @@
 use crate::frame::FrameCodec;
+use crate::messages::ProtoMessage;
 use crate::packet_encrypted;
 use crate::packet_plaintext;
-use crate::parser::ProtoMessage;
 use crate::proto::version_2025_12_1::DeviceInfoResponse;
 use crate::proto::version_2025_12_1::DisconnectResponse;
 use crate::proto::version_2025_12_1::HelloResponse;

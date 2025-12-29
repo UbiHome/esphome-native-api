@@ -305,7 +305,7 @@ mod tests {
         assert!(reader.next().await.unwrap().is_err());
     }
 
-    use crate::{packet_encrypted, packet_plaintext, parser::ProtoMessage, proto};
+    use crate::{messages::ProtoMessage, packet_encrypted, packet_plaintext, proto};
 
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;

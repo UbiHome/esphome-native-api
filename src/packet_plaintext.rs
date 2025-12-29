@@ -1,5 +1,5 @@
-use crate::parser;
-pub use crate::parser::ProtoMessage;
+use crate::messages;
+pub use crate::messages::ProtoMessage;
 use log::debug;
 
 pub fn packet_to_message(buffer: &[u8]) -> Result<ProtoMessage, Box<dyn std::error::Error>> {
@@ -7,12 +7,12 @@ pub fn packet_to_message(buffer: &[u8]) -> Result<ProtoMessage, Box<dyn std::err
     let packet_content = &buffer[1..];
     debug!("Message type: {}", message_type);
     debug!("Message: {:02X?}", packet_content);
-    Ok(parser::parse_proto_message(message_type, packet_content).unwrap())
+    Ok(messages::parse_proto_message(message_type, packet_content).unwrap())
 }
 
 pub fn message_to_packet(message: &ProtoMessage) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let response_content = parser::proto_to_vec(message)?;
-    let message_type = parser::message_to_num(message)?;
+    let response_content = messages::proto_to_vec(message)?;
+    let message_type = messages::message_to_num(message)?;
     let message_bit: Vec<u8> = vec![message_type];
 
     Ok([message_bit, response_content].concat())

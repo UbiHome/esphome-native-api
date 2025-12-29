@@ -1,1 +1,2 @@
 *.rs
+!mapping_macros.rs

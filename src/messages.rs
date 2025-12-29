@@ -1,44 +1,5 @@
-// TODO: Parser should part of the proto generator 
-use crate::proto::version_2025_12_1::{
-    AlarmControlPanelCommandRequest, AlarmControlPanelStateResponse, BinarySensorStateResponse,
-    BluetoothConnectionsFreeResponse, BluetoothDeviceClearCacheResponse,
-    BluetoothDeviceConnectionResponse, BluetoothDevicePairingResponse, BluetoothDeviceRequest,
-    BluetoothDeviceUnpairingResponse, BluetoothGattErrorResponse,
-    BluetoothGattGetServicesDoneResponse, BluetoothGattGetServicesRequest,
-    BluetoothGattGetServicesResponse, BluetoothGattNotifyDataResponse, BluetoothGattNotifyRequest,
-    BluetoothGattNotifyResponse, BluetoothGattReadDescriptorRequest, BluetoothGattReadRequest,
-    BluetoothGattReadResponse, BluetoothGattWriteDescriptorRequest, BluetoothGattWriteRequest,
-    BluetoothGattWriteResponse, BluetoothLeAdvertisementResponse,
-    BluetoothLeRawAdvertisementsResponse, ButtonCommandRequest, CameraImageRequest,
-    CameraImageResponse, ClimateCommandRequest, ClimateStateResponse, AuthenticationRequest,
-    AuthenticationResponse, CoverCommandRequest, CoverStateResponse, DateCommandRequest,
-    DateStateResponse, DateTimeCommandRequest, DateTimeStateResponse, DeviceInfoRequest,
-    DeviceInfoResponse, DisconnectRequest, DisconnectResponse, EventResponse,
-    ExecuteServiceRequest, FanCommandRequest, FanStateResponse, GetTimeRequest, GetTimeResponse,
-    HelloRequest, HelloResponse, HomeAssistantStateResponse,
-    LightCommandRequest, LightStateResponse, ListEntitiesAlarmControlPanelResponse,
-    ListEntitiesBinarySensorResponse, ListEntitiesButtonResponse, ListEntitiesCameraResponse,
-    ListEntitiesClimateResponse, ListEntitiesCoverResponse, ListEntitiesDateResponse,
-    ListEntitiesDateTimeResponse, ListEntitiesDoneResponse, ListEntitiesEventResponse,
-    ListEntitiesFanResponse, ListEntitiesLightResponse, ListEntitiesLockResponse,
-    ListEntitiesMediaPlayerResponse, ListEntitiesNumberResponse, ListEntitiesRequest,
-    ListEntitiesSelectResponse, ListEntitiesSensorResponse, ListEntitiesServicesResponse,
-    ListEntitiesSwitchResponse, ListEntitiesTextResponse, ListEntitiesTextSensorResponse,
-    ListEntitiesTimeResponse, ListEntitiesUpdateResponse, ListEntitiesValveResponse,
-    LockCommandRequest, LockStateResponse, MediaPlayerCommandRequest, MediaPlayerStateResponse,
-    NumberCommandRequest, NumberStateResponse, PingRequest, PingResponse, SelectCommandRequest,
-    SelectStateResponse, SensorStateResponse, SubscribeBluetoothConnectionsFreeRequest,
-    SubscribeBluetoothLeAdvertisementsRequest, SubscribeHomeAssistantStateResponse,
-    SubscribeHomeAssistantStatesRequest, SubscribeHomeassistantServicesRequest,
-    SubscribeLogsRequest, SubscribeLogsResponse, SubscribeStatesRequest,
-    SubscribeVoiceAssistantRequest, SwitchCommandRequest, SwitchStateResponse, TextCommandRequest,
-    TextSensorStateResponse, TextStateResponse, TimeCommandRequest, TimeStateResponse,
-    UnsubscribeBluetoothLeAdvertisementsRequest, UpdateCommandRequest, UpdateStateResponse,
-    ValveCommandRequest, ValveStateResponse, VoiceAssistantAnnounceFinished,
-    VoiceAssistantAnnounceRequest, VoiceAssistantAudio, VoiceAssistantConfigurationRequest,
-    VoiceAssistantConfigurationResponse, VoiceAssistantEventResponse, VoiceAssistantRequest,
-    VoiceAssistantResponse, VoiceAssistantSetConfiguration, VoiceAssistantTimerEventResponse,
-};
+// TODO: Parser should part of the proto generator
+use crate::proto::version_2025_12_1::*;
 use prost::Message;
 
 macro_rules! proto_message_mappings {
@@ -67,7 +28,7 @@ macro_rules! proto_message_mappings {
             match message {
                 $(
                     ProtoMessage::$struct(msg) => {
-                        
+
                         Ok(msg.encode_to_vec())
                     }
                 )*

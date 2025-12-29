@@ -1,5 +1,5 @@
-use crate::parser;
-pub use crate::parser::ProtoMessage;
+use crate::messages;
+pub use crate::messages::ProtoMessage;
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
 use log::debug;
@@ -32,15 +32,15 @@ pub fn packet_to_message(
     debug!("Message type: {}", message_type);
     debug!("Message: {:?}", packet_content);
 
-    Ok(parser::parse_proto_message(message_type, packet_content).unwrap())
+    Ok(messages::parse_proto_message(message_type, packet_content).unwrap())
 }
 
 pub fn message_to_packet(
     message: &ProtoMessage,
     cipher_encrypt: &mut CipherState<ChaCha20Poly1305>,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let response_content = parser::proto_to_vec(message)?;
-    let message_type = (parser::message_to_num(message).unwrap() as u16)
+    let response_content = messages::proto_to_vec(message)?;
+    let message_type = (messages::message_to_num(message).unwrap() as u16)
         .to_be_bytes()
         .to_vec();
     let message_length = (response_content.len() as u16).to_be_bytes().to_vec();

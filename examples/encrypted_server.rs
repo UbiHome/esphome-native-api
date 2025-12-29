@@ -2,7 +2,7 @@ use std::env;
 use std::{future, net::SocketAddr, time::Duration};
 
 use esphome_native_api::esphomeapi::EspHomeApi;
-use esphome_native_api::parser::ProtoMessage;
+use esphome_native_api::messages::ProtoMessage;
 use esphome_native_api::proto::version_2025_12_1::ListEntitiesButtonResponse;
 use esphome_native_api::proto::version_2025_12_1::{
     ListEntitiesBinarySensorResponse, ListEntitiesDoneResponse, ListEntitiesLightResponse,

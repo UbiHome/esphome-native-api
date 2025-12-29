@@ -41,9 +41,20 @@ members = ["generator"]
 pretty_env_logger = "0.5.0"
 test-log = { version = "0.2.16", features = ["log", "color"] }
 
+[[example]]
+name = "multi_version"
+path = "examples/multi_version.rs"
+required-features = ["version_2025_12_2"]
+
+[[example]]
+name = "easy_server"
+path = "examples/easy_server.rs"
+required-features = ["server"]
+
 [features]
 default = ["std", "version_2025_12_1"]
 std = []
+server = []
 version_2025_12_2 = []
 version_2025_12_1 = []
 version_2025_12_0 = []
