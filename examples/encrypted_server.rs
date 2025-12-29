@@ -1,16 +1,20 @@
 use std::{future, net::SocketAddr, time::Duration};
 
-use esphome_native_api::proto::version_2025_12_1::{ListEntitiesBinarySensorResponse, ListEntitiesDoneResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse, ListEntitiesSwitchResponse, SensorStateResponse};
-use log::{debug, info, LevelFilter};
-use tokio::{net::TcpSocket, signal, time::sleep};
-use esphome_native_api::proto::version_2025_12_1::ListEntitiesButtonResponse;
-use esphome_native_api::parser::ProtoMessage;
 use esphome_native_api::esphomeapi::EspHomeApi;
-
+use esphome_native_api::parser::ProtoMessage;
+use esphome_native_api::proto::version_2025_12_1::ListEntitiesButtonResponse;
+use esphome_native_api::proto::version_2025_12_1::{
+    ListEntitiesBinarySensorResponse, ListEntitiesDoneResponse, ListEntitiesLightResponse,
+    ListEntitiesSensorResponse, ListEntitiesSwitchResponse, SensorStateResponse,
+};
+use log::{LevelFilter, debug, info};
+use tokio::{net::TcpSocket, signal, time::sleep};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    pretty_env_logger::formatted_builder().filter_level(LevelFilter::Trace).init();
+    pretty_env_logger::formatted_builder()
+        .filter_level(LevelFilter::Trace)
+        .init();
 
     // let addr: SocketAddr = SocketAddr::from(([0, 0, 0, 0], 7001));
     let addr: SocketAddr = SocketAddr::from(([127, 0, 0, 1], 7001));
@@ -23,15 +27,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug!("Listening on: {}", addr);
 
     let main_server = async {
-
         loop {
-            let (stream, _) = listener.accept().await
+            let (stream, _) = listener
+                .accept()
+                .await
                 .expect("Failed to accept connection");
             debug!("Accepted request from {}", stream.peer_addr().unwrap());
 
             // Spawn a tokio task to serve multiple connections concurrently
             tokio::task::spawn(async move {
-            
                 let mut server = EspHomeApi::builder()
                     .api_version_major(1)
                     .api_version_minor(42)
@@ -47,7 +51,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .encryption_key("px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA=".to_string())
                     .build();
 
-               
                 let entities = vec![
                     // All supported entities in alphabetical order
                     ProtoMessage::ListEntitiesBinarySensorResponse(
@@ -69,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         key: 0,
                         name: "test_button".to_string(),
                         // unique_id: "test_button_unique_id".to_string(),
-                            device_id: 0,
+                        device_id: 0,
                         icon: "mdi:test-button-icon".to_string(),
                         disabled_by_default: false,
                         entity_category: 0,
@@ -80,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         key: 4,
                         name: "test_light".to_string(),
                         // unique_id: "test_light_unique_id".to_string(),
-                            device_id: 0,
+                        device_id: 0,
 
                         icon: "mdi:test-light-icon".to_string(),
                         disabled_by_default: false,
@@ -99,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         key: 2,
                         name: "test_sensor".to_string(),
                         // unique_id: "test_sensor_unique_id".to_string(),
-                            device_id: 0,
+                        device_id: 0,
                         icon: "mdi:test-sensor-icon".to_string(),
                         unit_of_measurement: "°C".to_string(),
                         accuracy_decimals: 2,
@@ -114,7 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         object_id: "test_switch_object_id".to_string(),
                         key: 1,
                         name: "test_switch".to_string(),
-                            device_id: 0,
+                        device_id: 0,
                         // unique_id: "test_switch_unique_id".to_string(),
                         icon: "mdi:test-switch-icon".to_string(),
                         device_class: "test_switch_device_class".to_string(),
@@ -142,29 +145,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ProtoMessage::ListEntitiesRequest(list_entities_request) => {
                                 debug!("ListEntitiesRequest: {:?}", list_entities_request);
 
-                                for sensor  in &entities {
-                                    tx_clone.send(sensor.clone()).unwrap();
+                                for sensor in &entities {
+                                    tx_clone.send(sensor.clone()).await.unwrap();
                                 }
-                                tx_clone.send(ProtoMessage::ListEntitiesDoneResponse(
-                                    ListEntitiesDoneResponse {},
-                                ))
-                                .unwrap();
+                                tx_clone
+                                    .send(ProtoMessage::ListEntitiesDoneResponse(
+                                        ListEntitiesDoneResponse {},
+                                    ))
+                                    .await
+                                    .unwrap();
                             }
                             ProtoMessage::SubscribeStatesRequest(_) => {
-                                let message = ProtoMessage::SensorStateResponse(SensorStateResponse {
-                                    key: 2,
-                                    device_id: 0,
-                                    state: 25.0,
-                                    missing_state: false,
-                                });
+                                let message =
+                                    ProtoMessage::SensorStateResponse(SensorStateResponse {
+                                        key: 2,
+                                        device_id: 0,
+                                        state: 25.0,
+                                        missing_state: false,
+                                    });
                                 for n in 1..=10 {
                                     sleep(Duration::from_secs(3)).await;
-                                    if tx.receiver_count() > 0 {
-                                        debug!("Sending message number {}", n);
-                                        tx.send(message.clone()).expect("Failed to send message");
-                                    }else{
-                                        break;
-                                    }
+                                    debug!("Sending message number {}", n);
+                                    tx.send(message.clone())
+                                        .await
+                                        .expect("Failed to send message");
                                 }
                             }
                             _ => {}
@@ -178,7 +182,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
     };
-    
+
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -204,5 +208,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Stopped");
 
     std::process::exit(0);
-
 }
