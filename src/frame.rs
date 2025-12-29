@@ -1,17 +1,11 @@
-use crate::packet_encrypted;
-pub use crate::parser::ProtoMessage;
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
 use log::debug;
 use log::info;
-use log::trace;
-use noise_rust_crypto::ChaCha20Poly1305;
 use prost::decode_length_delimiter;
 use prost::encode_length_delimiter;
 
-use crate::packet_plaintext::message_to_packet;
 use bytes::{Buf, BytesMut};
-use noise_protocol::CipherState;
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Encoder;
 
@@ -172,6 +166,8 @@ impl Encoder<Vec<u8>> for FrameCodec {
 #[cfg(test)]
 mod tests {
     use futures::sink::SinkExt;
+    use noise_protocol::CipherState;
+    use noise_rust_crypto::ChaCha20Poly1305;
     use std::io::Cursor;
     use tokio_stream::StreamExt;
 
@@ -310,7 +306,7 @@ mod tests {
         assert!(reader.next().await.unwrap().is_err());
     }
 
-    use crate::proto;
+    use crate::{packet_encrypted, packet_plaintext, parser::ProtoMessage, proto};
 
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
@@ -329,7 +325,7 @@ mod tests {
 
         let mut writer = FramedWrite::new(buffer, encoder);
         writer
-            .send(message_to_packet(&hello_message).unwrap())
+            .send(packet_plaintext::message_to_packet(&hello_message).unwrap())
             .await
             .unwrap();
 
@@ -405,7 +401,7 @@ mod tests {
 
         let mut writer = FramedWrite::new(buffer, encoder);
         writer
-            .send(message_to_packet(&hello_message).unwrap())
+            .send(packet_plaintext::message_to_packet(&hello_message).unwrap())
             .await
             .unwrap();
 
@@ -443,7 +439,7 @@ mod tests {
 
         let mut writer = FramedWrite::new(buffer, encoder);
         writer
-            .send(message_to_packet(&hello_message).unwrap())
+            .send(packet_plaintext::message_to_packet(&hello_message).unwrap())
             .await
             .unwrap();
         let expected_bytes: Vec<u8> = vec![
@@ -480,7 +476,7 @@ mod tests {
 
         let mut writer = FramedWrite::new(buffer, encoder);
         writer
-            .send(message_to_packet(&hello_message).unwrap())
+            .send(packet_plaintext::message_to_packet(&hello_message).unwrap())
             .await
             .unwrap();
         let expected_bytes: Vec<u8> = vec![

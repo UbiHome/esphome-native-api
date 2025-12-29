@@ -62,11 +62,6 @@ pub struct EspHomeApi {
     #[builder(default=Arc::new(AtomicBool::new(true)))]
     pub(crate) plaintext_communication: Arc<AtomicBool>,
 
-    // #[builder(default=Arc::new(Mutex::new(None)))]
-    // pub(crate) communication_type: Arc<Mutex<Option<CommunicationType>>>,
-    #[builder(default=Arc::new(Mutex::new(None)), setter(skip))]
-    pub(crate) handshake_state:
-        Arc<Mutex<Option<HandshakeState<X25519, ChaCha20Poly1305, Sha256>>>>,
     #[builder(default=Arc::new(Mutex::new(None)), setter(skip))]
     pub(crate) encrypt_cypher: Arc<Mutex<Option<CipherState<ChaCha20Poly1305>>>>,
     #[builder(default=Arc::new(Mutex::new(None)), setter(skip))]
@@ -127,7 +122,7 @@ impl EspHomeApi {
     /// broadcast receiver for all messages not handled by the abstraction
     pub async fn start(
         &mut self,
-        mut tcp_stream: TcpStream,
+        tcp_stream: TcpStream,
     ) -> Result<
         (
             mpsc::Sender<ProtoMessage>,
@@ -139,6 +134,7 @@ impl EspHomeApi {
         let (answer_messages_tx, mut answer_messages_rx) = mpsc::channel::<ProtoMessage>(16);
         let (outgoing_messages_tx, outgoing_messages_rx) = broadcast::channel::<ProtoMessage>(16);
 
+        #[allow(deprecated)]
         let device_info = DeviceInfoResponse {
             api_encryption_supported: self.encryption_key.is_some(),
             uses_password: false,
@@ -173,7 +169,6 @@ impl EspHomeApi {
             server_info: self.server_info.clone(),
             name: self.name.clone(),
         };
-        let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
 
         let encrypt_cypher_clone = self.encrypt_cypher.clone();
         let decrypt_cypher_clone = self.decrypt_cypher.clone();
@@ -183,7 +178,7 @@ impl EspHomeApi {
         let encryption_key = self.encryption_key.clone();
 
         let mut buf = vec![0; 1];
-        let n = tcp_read
+        let n = tcp_stream
             .peek(&mut buf)
             .await
             .expect("failed to read data from socket");
@@ -223,6 +218,7 @@ impl EspHomeApi {
             .load(std::sync::atomic::Ordering::Relaxed);
         let encrypted = !plaintext_communication;
 
+        let (tcp_read, tcp_write) = tcp_stream.into_split();
         let decoder = FrameCodec::new(encrypted);
         let encoder = FrameCodec::new(encrypted);
         let mut reader = FramedRead::new(tcp_read, decoder);
@@ -369,7 +365,6 @@ impl EspHomeApi {
         // Clone all necessary data before spawning the task
         let answer_messages_tx_clone = answer_messages_tx.clone();
         let decrypt_cypher_clone = self.decrypt_cypher.clone();
-        let plaintext_communication = self.plaintext_communication.clone();
         // Read Loop
         tokio::spawn(async move {
             loop {
