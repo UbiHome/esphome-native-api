@@ -1,7 +1,7 @@
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
 use log::debug;
-use log::info;
+use log::trace;
 use prost::decode_length_delimiter;
 use prost::encode_length_delimiter;
 
@@ -50,7 +50,7 @@ impl Decoder for FrameCodec {
                 // Not enough data to read length marker.
                 return Ok(None);
             }
-            info!("length bytes: {:?}", &src[1..3]);
+            trace!("length bytes: {:?}", &src[1..3]);
             length = BigEndian::read_u16(&src[1..3]) as usize;
         } else {
             if src[0] != 0 {
@@ -75,14 +75,12 @@ impl Decoder for FrameCodec {
                     ));
                 }
             }
-            info!("Varint cursor at: {}", varint_length);
-            info!("Varint bytes: {:?}", &src[1..varint_length + 1]);
+            trace!("Varint cursor at: {}", varint_length);
+            trace!("Varint bytes: {:?}", &src[1..varint_length + 1]);
             // Read length marker.
             length = decode_length_delimiter(&src[1..varint_length + 1]).unwrap() as usize + 1; // Add one extra byte for the packet type (which is not included in the frame length).
         }
-        info!("Frame length: {}", &length);
-
-        // info!("Buffer: {:?}", src);
+        trace!("Frame length: {}", &length);
 
         // Already reserve space when the length is known
         if src.capacity() < 1 + varint_length + length {
@@ -93,11 +91,11 @@ impl Decoder for FrameCodec {
             src.reserve(1 + varint_length + length - src.len());
         }
 
-        info!("Buffer length: {}", src.len());
+        trace!("Buffer length: {}", src.len());
 
         if src.len() < 1 + varint_length + length {
             // The full string has not yet arrived.
-            info!("Not enough data yet.");
+            trace!("Not enough data yet.");
             return Ok(None);
         }
 
@@ -107,10 +105,10 @@ impl Decoder for FrameCodec {
         let new_cursor = 1 + varint_length + length;
 
         // Use advance to modify src such that it no longer contains this frame.
-        info!("Advancing cursor to: {}", new_cursor);
+        trace!("Advancing cursor to: {}", new_cursor);
         src.advance(new_cursor);
 
-        // Convert the data to a string, or fail if it is not valid utf-8.
+        debug!("Received frame: {:02X?}", &data);
         Ok(Some(data))
     }
 }

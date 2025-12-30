@@ -239,7 +239,7 @@ impl EspHomeApi {
             }
 
             let frame_noise_hello = reader.next().await.unwrap().unwrap();
-            trace!("Frame 1: {:02X?}", &frame_noise_hello);
+            debug!("Frame 1: {:02X?}", &frame_noise_hello);
 
             let message_server_hello =
                 packet_encrypted::generate_server_hello_frame(self.name.clone(), self.mac.clone());
@@ -248,7 +248,7 @@ impl EspHomeApi {
             writer.flush().await.unwrap();
 
             let frame_handshake_request = reader.next().await.unwrap().unwrap();
-            info!("Frame 2: {:02X?}", &frame_handshake_request);
+            debug!("Frame 2: {:02X?}", &frame_handshake_request);
 
             // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
             let mut handshake_state: HandshakeState<X25519, ChaCha20Poly1305, Sha256> =
