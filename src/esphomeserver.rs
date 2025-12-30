@@ -1,9 +1,5 @@
 #![allow(dead_code)]
 
-use crate::esphomeapi::EspHomeApi;
-use crate::parser::ProtoMessage;
-
-use crate::proto::version_2025_12_1::ListEntitiesDoneResponse;
 use log::debug;
 use log::error;
 use noise_protocol::CipherState;
@@ -20,6 +16,10 @@ use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use typed_builder::TypedBuilder;
+
+use crate::esphomeapi::EspHomeApi;
+use crate::parser::ProtoMessage;
+use crate::proto::ListEntitiesDoneResponse;
 
 #[derive(TypedBuilder)]
 pub struct EspHomeServer {

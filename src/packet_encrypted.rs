@@ -1,10 +1,11 @@
-use crate::parser;
-pub use crate::parser::ProtoMessage;
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
 use log::debug;
 use noise_protocol::CipherState;
 use noise_rust_crypto::ChaCha20Poly1305;
+
+use crate::parser;
+pub use parser::ProtoMessage;
 
 pub fn generate_server_hello_frame(name: String, mac: Option<String>) -> Vec<u8> {
     let mut message_server_hello: Vec<u8> = Vec::new();
@@ -61,7 +62,7 @@ mod tests {
 
     #[test]
     fn test_message_to_packet() {
-        let hello_message = ProtoMessage::HelloResponse(proto::version_2025_12_1::HelloResponse {
+        let hello_message = ProtoMessage::HelloResponse(proto::HelloResponse {
             api_version_major: 1,
             api_version_minor: 1,
             server_info: "Test Server".to_string(),

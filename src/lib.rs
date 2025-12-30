@@ -2,9 +2,6 @@
 
 pub mod proto;
 
-
-#[cfg(feature = "std")]
-pub mod parser;
 #[cfg(feature = "std")]
 pub mod esphomeapi;
 #[cfg(feature = "std")]
@@ -13,7 +10,8 @@ pub mod esphomeserver;
 mod frame;
 #[cfg(feature = "std")]
 mod packet_plaintext;
+#[cfg(feature = "std")]
+pub mod parser;
 // #[cfg(feature = "std")]
 #[cfg(feature = "std")]
 mod packet_encrypted;
-

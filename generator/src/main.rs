@@ -53,10 +53,11 @@ async fn main() {
                 println!(" => Generating");
             }
 
-            let package_name = get_package_name(&release.tag_name);
+            let package_version = &release.tag_name;
+            let package_name = get_package_name(package_version);
             versions.push(package_name.clone());
 
-            let protos_dir = generator_root_dir.join("protos").join(&release.tag_name);
+            let protos_dir = generator_root_dir.join("protos").join(package_version);
             fs::create_dir_all(&protos_dir).unwrap();
 
             // Proto file
@@ -65,7 +66,7 @@ async fn main() {
                 let api_proto = repo
                     .get_content()
                     .path("esphome/components/api/api.proto")
-                    .r#ref(release.tag_name.clone())
+                    .r#ref(&release.tag_name)
                     .send()
                     .await
                     .unwrap();
@@ -85,7 +86,7 @@ async fn main() {
                 let api_proto_options = repo
                     .get_content()
                     .path("esphome/components/api/api_options.proto")
-                    .r#ref(release.tag_name.clone())
+                    .r#ref(&release.tag_name)
                     .send()
                     .await
                     .unwrap();
@@ -100,9 +101,9 @@ async fn main() {
             }
 
             mod_file_content.push_str(&format!(
-                "#[cfg(feature = \"{}\")]\npub mod {};\n",
-                package_name, package_name
+                "\npub mod {package_name};\n#[cfg(feature = {package_name:?})]\npub use {package_name}::*;\n#[cfg(feature = {package_name:?})]\npub(crate) const VERSION: &str = {package_version:?};\n"
             ));
+
             let write_dir = root_output_dir.join(&package_name);
             fs::create_dir_all(&write_dir).unwrap();
 
@@ -116,7 +117,7 @@ async fn main() {
                 .unwrap();
 
             // Only till this release:
-            if release.tag_name == LAST_SUPPLIED_VERSION {
+            if package_version == LAST_SUPPLIED_VERSION {
                 println!("Stopped (hit last supplied version)");
                 break 'outer;
             }
@@ -141,8 +142,8 @@ async fn main() {
     file.seek(std::io::SeekFrom::Start(pos.try_into().unwrap()))
         .unwrap();
     writeln!(file, "[features]").unwrap();
-    let default_feature_flag = get_package_name(CURRENT_VERSION);
-    writeln!(file, "default = [\"std\", \"{}\"]", default_feature_flag).unwrap();
+    let default_package_name = get_package_name(CURRENT_VERSION);
+    writeln!(file, "default = [\"std\", \"{}\"]", default_package_name).unwrap();
     writeln!(file, "std = []").unwrap();
 
     for version in versions {

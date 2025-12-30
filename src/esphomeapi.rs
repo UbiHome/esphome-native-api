@@ -1,11 +1,3 @@
-use crate::frame::FrameCodec;
-use crate::packet_encrypted;
-use crate::packet_plaintext;
-use crate::parser::ProtoMessage;
-use crate::proto::version_2025_12_1::DeviceInfoResponse;
-use crate::proto::version_2025_12_1::DisconnectResponse;
-use crate::proto::version_2025_12_1::HelloResponse;
-use crate::proto::version_2025_12_1::PingResponse;
 use base64::prelude::*;
 use futures::sink::SinkExt;
 use log::debug;
@@ -32,6 +24,12 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 use tokio_util::codec::FramedWrite;
 use typed_builder::TypedBuilder;
+
+use crate::frame::FrameCodec;
+use crate::packet_encrypted;
+use crate::packet_plaintext;
+use crate::parser::ProtoMessage;
+use crate::proto::{self, DeviceInfoResponse, DisconnectResponse, HelloResponse, PingResponse};
 
 async fn write_error_and_disconnect(
     mut writer: FramedWrite<OwnedWriteHalf, FrameCodec>,
@@ -108,9 +106,6 @@ pub struct EspHomeApi {
     legacy_voice_assistant_version: u32,
     #[builder(default = 0)]
     voice_assistant_feature_flags: u32,
-
-    #[builder(default = "2025.4.0".to_string())]
-    esphome_version: String,
 }
 
 /// Handles the EspHome Api, with encryption etc.
@@ -137,7 +132,7 @@ impl EspHomeApi {
             uses_password: false,
             name: self.name.clone(),
             mac_address: self.mac.clone().unwrap_or_default(),
-            esphome_version: self.esphome_version.clone(),
+            esphome_version: proto::VERSION.to_owned(),
             compilation_time: self.compilation_time.clone().unwrap_or_default(),
             model: self.model.clone().unwrap_or_default(),
             has_deep_sleep: false,
