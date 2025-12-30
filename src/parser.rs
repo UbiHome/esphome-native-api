@@ -1,45 +1,70 @@
-// TODO: Parser should part of the proto generator 
-use crate::proto::version_2025_12_1::{
-    AlarmControlPanelCommandRequest, AlarmControlPanelStateResponse, BinarySensorStateResponse,
-    BluetoothConnectionsFreeResponse, BluetoothDeviceClearCacheResponse,
-    BluetoothDeviceConnectionResponse, BluetoothDevicePairingResponse, BluetoothDeviceRequest,
-    BluetoothDeviceUnpairingResponse, BluetoothGattErrorResponse,
-    BluetoothGattGetServicesDoneResponse, BluetoothGattGetServicesRequest,
-    BluetoothGattGetServicesResponse, BluetoothGattNotifyDataResponse, BluetoothGattNotifyRequest,
-    BluetoothGattNotifyResponse, BluetoothGattReadDescriptorRequest, BluetoothGattReadRequest,
-    BluetoothGattReadResponse, BluetoothGattWriteDescriptorRequest, BluetoothGattWriteRequest,
-    BluetoothGattWriteResponse, BluetoothLeAdvertisementResponse,
-    BluetoothLeRawAdvertisementsResponse, ButtonCommandRequest, CameraImageRequest,
-    CameraImageResponse, ClimateCommandRequest, ClimateStateResponse, AuthenticationRequest,
-    AuthenticationResponse, CoverCommandRequest, CoverStateResponse, DateCommandRequest,
-    DateStateResponse, DateTimeCommandRequest, DateTimeStateResponse, DeviceInfoRequest,
-    DeviceInfoResponse, DisconnectRequest, DisconnectResponse, EventResponse,
-    ExecuteServiceRequest, FanCommandRequest, FanStateResponse, GetTimeRequest, GetTimeResponse,
-    HelloRequest, HelloResponse, HomeAssistantStateResponse,
-    LightCommandRequest, LightStateResponse, ListEntitiesAlarmControlPanelResponse,
-    ListEntitiesBinarySensorResponse, ListEntitiesButtonResponse, ListEntitiesCameraResponse,
-    ListEntitiesClimateResponse, ListEntitiesCoverResponse, ListEntitiesDateResponse,
-    ListEntitiesDateTimeResponse, ListEntitiesDoneResponse, ListEntitiesEventResponse,
-    ListEntitiesFanResponse, ListEntitiesLightResponse, ListEntitiesLockResponse,
-    ListEntitiesMediaPlayerResponse, ListEntitiesNumberResponse, ListEntitiesRequest,
-    ListEntitiesSelectResponse, ListEntitiesSensorResponse, ListEntitiesServicesResponse,
-    ListEntitiesSwitchResponse, ListEntitiesTextResponse, ListEntitiesTextSensorResponse,
-    ListEntitiesTimeResponse, ListEntitiesUpdateResponse, ListEntitiesValveResponse,
-    LockCommandRequest, LockStateResponse, MediaPlayerCommandRequest, MediaPlayerStateResponse,
-    NumberCommandRequest, NumberStateResponse, PingRequest, PingResponse, SelectCommandRequest,
-    SelectStateResponse, SensorStateResponse, SubscribeBluetoothConnectionsFreeRequest,
-    SubscribeBluetoothLeAdvertisementsRequest, SubscribeHomeAssistantStateResponse,
-    SubscribeHomeAssistantStatesRequest, SubscribeHomeassistantServicesRequest,
-    SubscribeLogsRequest, SubscribeLogsResponse, SubscribeStatesRequest,
-    SubscribeVoiceAssistantRequest, SwitchCommandRequest, SwitchStateResponse, TextCommandRequest,
-    TextSensorStateResponse, TextStateResponse, TimeCommandRequest, TimeStateResponse,
-    UnsubscribeBluetoothLeAdvertisementsRequest, UpdateCommandRequest, UpdateStateResponse,
-    ValveCommandRequest, ValveStateResponse, VoiceAssistantAnnounceFinished,
-    VoiceAssistantAnnounceRequest, VoiceAssistantAudio, VoiceAssistantConfigurationRequest,
-    VoiceAssistantConfigurationResponse, VoiceAssistantEventResponse, VoiceAssistantRequest,
-    VoiceAssistantResponse, VoiceAssistantSetConfiguration, VoiceAssistantTimerEventResponse,
-};
+// TODO: Parser should part of the proto generator
+
+use core::fmt;
+
 use prost::Message;
+
+use crate::proto::{
+    AlarmControlPanelCommandRequest, AlarmControlPanelStateResponse, AuthenticationRequest,
+    AuthenticationResponse, BinarySensorStateResponse, BluetoothConnectionsFreeResponse,
+    BluetoothDeviceClearCacheResponse, BluetoothDeviceConnectionResponse,
+    BluetoothDevicePairingResponse, BluetoothDeviceRequest, BluetoothDeviceUnpairingResponse,
+    BluetoothGattErrorResponse, BluetoothGattGetServicesDoneResponse,
+    BluetoothGattGetServicesRequest, BluetoothGattGetServicesResponse,
+    BluetoothGattNotifyDataResponse, BluetoothGattNotifyRequest, BluetoothGattNotifyResponse,
+    BluetoothGattReadDescriptorRequest, BluetoothGattReadRequest, BluetoothGattReadResponse,
+    BluetoothGattWriteDescriptorRequest, BluetoothGattWriteRequest, BluetoothGattWriteResponse,
+    BluetoothLeAdvertisementResponse, BluetoothLeRawAdvertisementsResponse, ButtonCommandRequest,
+    CameraImageRequest, CameraImageResponse, ClimateCommandRequest, ClimateStateResponse,
+    CoverCommandRequest, CoverStateResponse, DateCommandRequest, DateStateResponse,
+    DateTimeCommandRequest, DateTimeStateResponse, DeviceInfoRequest, DeviceInfoResponse,
+    DisconnectRequest, DisconnectResponse, EventResponse, ExecuteServiceRequest, FanCommandRequest,
+    FanStateResponse, GetTimeRequest, GetTimeResponse, HelloRequest, HelloResponse,
+    HomeAssistantStateResponse, LightCommandRequest, LightStateResponse,
+    ListEntitiesAlarmControlPanelResponse, ListEntitiesBinarySensorResponse,
+    ListEntitiesButtonResponse, ListEntitiesCameraResponse, ListEntitiesClimateResponse,
+    ListEntitiesCoverResponse, ListEntitiesDateResponse, ListEntitiesDateTimeResponse,
+    ListEntitiesDoneResponse, ListEntitiesEventResponse, ListEntitiesFanResponse,
+    ListEntitiesLightResponse, ListEntitiesLockResponse, ListEntitiesMediaPlayerResponse,
+    ListEntitiesNumberResponse, ListEntitiesRequest, ListEntitiesSelectResponse,
+    ListEntitiesSensorResponse, ListEntitiesServicesResponse, ListEntitiesSwitchResponse,
+    ListEntitiesTextResponse, ListEntitiesTextSensorResponse, ListEntitiesTimeResponse,
+    ListEntitiesUpdateResponse, ListEntitiesValveResponse, LockCommandRequest, LockStateResponse,
+    MediaPlayerCommandRequest, MediaPlayerStateResponse, NumberCommandRequest, NumberStateResponse,
+    PingRequest, PingResponse, SelectCommandRequest, SelectStateResponse, SensorStateResponse,
+    SubscribeBluetoothConnectionsFreeRequest, SubscribeBluetoothLeAdvertisementsRequest,
+    SubscribeHomeAssistantStateResponse, SubscribeHomeAssistantStatesRequest,
+    SubscribeHomeassistantServicesRequest, SubscribeLogsRequest, SubscribeLogsResponse,
+    SubscribeStatesRequest, SubscribeVoiceAssistantRequest, SwitchCommandRequest,
+    SwitchStateResponse, TextCommandRequest, TextSensorStateResponse, TextStateResponse,
+    TimeCommandRequest, TimeStateResponse, UnsubscribeBluetoothLeAdvertisementsRequest,
+    UpdateCommandRequest, UpdateStateResponse, ValveCommandRequest, ValveStateResponse,
+    VoiceAssistantAnnounceFinished, VoiceAssistantAnnounceRequest, VoiceAssistantAudio,
+    VoiceAssistantConfigurationRequest, VoiceAssistantConfigurationResponse,
+    VoiceAssistantEventResponse, VoiceAssistantRequest, VoiceAssistantResponse,
+    VoiceAssistantSetConfiguration, VoiceAssistantTimerEventResponse,
+};
+
+#[derive(Debug)]
+pub enum ParseError {
+    UnknownMessageType(u8),
+    FailedToDecode(&'static str),
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownMessageType(message_type) => {
+                write!(f, "Unknown message type: {message_type}")
+            }
+            Self::FailedToDecode(ty) => {
+                write!(f, "Failed to decode {ty}.")
+            }
+        }
+    }
+}
+
+impl core::error::Error for ParseError {}
 
 macro_rules! proto_message_mappings {
     ($($type_id:expr => $struct:ident),* $(,)?) => {
@@ -51,35 +76,35 @@ macro_rules! proto_message_mappings {
             )*
         }
 
-        // Generate the parse_proto_message function
-        pub fn parse_proto_message(message_type: usize, buf: &[u8]) -> Result<ProtoMessage, &'static str> {
-            match message_type {
-                $(
-                    $type_id => $struct::decode(buf)
-                        .map(ProtoMessage::$struct)
-                        .map_err(|_| concat!("Failed to decode ", stringify!($struct))),
-                )*
-                _ => Err(Box::leak(format!("Unknown message type: {}", message_type).into_boxed_str())),
+        impl ProtoMessage {
+            /// Parses a message from a message type and content.
+            pub fn parse(message_type: u8, buf: &[u8]) -> Result<Self, ParseError> {
+                match message_type {
+                    $(
+                        $type_id => $struct::decode(buf)
+                            .map(Self::$struct)
+                            .map_err(|_| ParseError::FailedToDecode(stringify!($struct))),
+                    )*
+                    message_type => Err(ParseError::UnknownMessageType(message_type)),
+                }
             }
-        }
 
-        pub fn proto_to_vec(message: &ProtoMessage) -> Result<Vec<u8>, &'static str> {
-            match message {
-                $(
-                    ProtoMessage::$struct(msg) => {
-                        
-                        Ok(msg.encode_to_vec())
-                    }
-                )*
+            /// Encodes the message to bytes.
+            pub fn to_bytes(&self) -> Vec<u8> {
+                match self {
+                    $(
+                        ProtoMessage::$struct(msg) => msg.encode_to_vec(),
+                    )*
+                }
             }
-        }
 
-        // Generate the parse_proto_message function
-        pub fn message_to_num(message_type: &ProtoMessage) -> Result<u8, &'static str> {
-            match message_type {
-                $(
-                    ProtoMessage::$struct(_) => Ok($type_id),
-                )*
+            // Returns the message type as a number.
+            pub fn message_type(&self) -> u8 {
+                match &self {
+                    $(
+                        ProtoMessage::$struct(_) => $type_id,
+                    )*
+                }
             }
         }
     };

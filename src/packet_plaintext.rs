@@ -1,18 +1,21 @@
-use crate::parser;
-pub use crate::parser::ProtoMessage;
 use log::debug;
 
+use crate::parser;
+pub use parser::ProtoMessage;
+
 pub fn packet_to_message(buffer: &[u8]) -> Result<ProtoMessage, Box<dyn std::error::Error>> {
-    let message_type = buffer[0] as usize;
+    let message_type = buffer[0];
+    debug!("Message type: {message_type}");
+
     let packet_content = &buffer[1..];
-    debug!("Message type: {}", message_type);
-    debug!("Message: {:02X?}", packet_content);
-    Ok(parser::parse_proto_message(message_type, packet_content).unwrap())
+    debug!("Message: {packet_content:02X?}");
+
+    Ok(ProtoMessage::parse(message_type, packet_content).unwrap())
 }
 
 pub fn message_to_packet(message: &ProtoMessage) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let response_content = parser::proto_to_vec(message)?;
-    let message_type = parser::message_to_num(message)?;
+    let response_content = message.to_bytes();
+    let message_type = message.message_type();
     let message_bit: Vec<u8> = vec![message_type];
 
     Ok([message_bit, response_content].concat())
@@ -22,7 +25,7 @@ pub fn message_to_packet(message: &ProtoMessage) -> Result<Vec<u8>, Box<dyn std:
 mod tests {
     use test_log::test;
 
-    use crate::proto::version_2025_12_1::HelloRequest;
+    use crate::proto::HelloRequest;
 
     use super::*;
 
