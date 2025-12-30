@@ -1,4 +1,5 @@
 use base64::prelude::*;
+use core::fmt;
 use futures::sink::SinkExt;
 use log::debug;
 use log::error;
@@ -31,22 +32,48 @@ use crate::packet_plaintext;
 use crate::parser::ProtoMessage;
 use crate::proto::{self, DeviceInfoResponse, DisconnectResponse, HelloResponse, PingResponse};
 
+#[derive(Debug, Clone, Copy)]
+pub enum Error {
+    InvalidMarkerByte(u8),
+    OnlyEncrypted,
+    NoEncryptionKey,
+    HandshakeMacFailure,
+    NoData,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::InvalidMarkerByte(byte) => write!(f, "Invalid marker byte: {}", byte),
+            Error::OnlyEncrypted => write!(f, "Only key encryption is enabled."),
+            Error::NoEncryptionKey => write!(
+                f,
+                "No encryption key set, but encrypted communication requested."
+            ),
+            Error::HandshakeMacFailure => write!(f, "Handshake MAC failure."),
+            Error::NoData => write!(f, "No data."),
+        }
+    }
+}
+
+impl core::error::Error for Error {}
+
 async fn write_error_and_disconnect(
     mut writer: FramedWrite<OwnedWriteHalf, FrameCodec>,
-    message: &str,
-) {
-    error!("API Failure: {}. Disconnecting.", message);
-    let packet = [[1].to_vec(), message.as_bytes().to_vec()].concat();
+    error: Error,
+) -> Error {
+    let error_string = error.to_string();
+    error!("API Failure: {} Disconnecting.", error_string);
+    let packet = [[1].to_vec(), error_string.into_bytes()].concat();
     writer.send(packet).await.unwrap();
     writer.flush().await.unwrap();
     let mut tcp_write = writer.into_inner();
     if let Err(err) = tcp_write.shutdown().await {
-        error!("failed to shutdown socket: {:?}", err);
+        error!("Failed to shutdown socket: {:?}", err);
     }
-}
 
-const ERROR_ONLY_ENCRYPTED: &str = "Only key encryption is enabled";
-const ERROR_HANDSHAKE_MAC_FAILURE: &str = "Handshake MAC failure";
+    error
+}
 
 #[derive(TypedBuilder, Clone)]
 pub struct EspHomeApi {
@@ -120,7 +147,7 @@ impl EspHomeApi {
             mpsc::Sender<ProtoMessage>,
             broadcast::Receiver<ProtoMessage>,
         ),
-        Box<dyn std::error::Error>,
+        Error,
     > {
         // Channel for messages
         let (answer_messages_tx, mut answer_messages_rx) = mpsc::channel::<ProtoMessage>(16);
@@ -176,12 +203,12 @@ impl EspHomeApi {
             .expect("failed to read data from socket");
 
         if n == 0 {
-            return Err("No data".into());
+            return Err(Error::NoData);
         }
 
         trace!("TCP Peeked: {:02X?}", &buf[0..n]);
 
-        let preamble = buf[0] as usize;
+        let preamble = buf[0];
 
         let first_message_received = self
             .first_message_received
@@ -201,8 +228,8 @@ impl EspHomeApi {
                     self.plaintext_communication
                         .store(false, std::sync::atomic::Ordering::Relaxed);
                 }
-                _ => {
-                    return Err(format!("Invalid marker byte {}", preamble).into());
+                preamble => {
+                    return Err(Error::InvalidMarkerByte(preamble));
                 }
             }
             self.first_message_received
@@ -224,13 +251,11 @@ impl EspHomeApi {
             if self.encryption_key.is_some() {
                 let encoder = FrameCodec::new(true);
                 let writer = FramedWrite::new(writer.into_inner(), encoder);
-                write_error_and_disconnect(writer, ERROR_ONLY_ENCRYPTED).await;
-                return Err(ERROR_ONLY_ENCRYPTED.into());
+                return Err(write_error_and_disconnect(writer, Error::OnlyEncrypted).await);
             }
         } else {
             if self.encryption_key.is_none() {
-                write_error_and_disconnect(writer, "No encrypted communication allowed").await;
-                return Err("No encryption key set, but encrypted communication requested.".into());
+                return Err(write_error_and_disconnect(writer, Error::NoEncryptionKey).await);
             }
 
             let frame_noise_hello = reader.next().await.unwrap().unwrap();
@@ -268,8 +293,9 @@ impl EspHomeApi {
                 Ok(_) => {}
                 Err(e) => match e.kind() {
                     ErrorKind::Decryption => {
-                        write_error_and_disconnect(writer, ERROR_HANDSHAKE_MAC_FAILURE).await;
-                        return Err(ERROR_HANDSHAKE_MAC_FAILURE.into());
+                        return Err(
+                            write_error_and_disconnect(writer, Error::HandshakeMacFailure).await,
+                        );
                     }
                     _ => {
                         debug!("Failed to read message: {}", e);

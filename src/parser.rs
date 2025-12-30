@@ -1,5 +1,7 @@
 // TODO: Parser should part of the proto generator
 
+use core::fmt;
+
 use prost::Message;
 
 use crate::proto::{
@@ -43,6 +45,27 @@ use crate::proto::{
     VoiceAssistantSetConfiguration, VoiceAssistantTimerEventResponse,
 };
 
+#[derive(Debug)]
+pub enum ParseError {
+    UnknownMessageType(u8),
+    FailedToDecode(&'static str),
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownMessageType(message_type) => {
+                write!(f, "Unknown message type: {message_type}")
+            }
+            Self::FailedToDecode(ty) => {
+                write!(f, "Failed to decode {ty}.")
+            }
+        }
+    }
+}
+
+impl core::error::Error for ParseError {}
+
 macro_rules! proto_message_mappings {
     ($($type_id:expr => $struct:ident),* $(,)?) => {
         // Generate the ProtoMessage enum
@@ -53,35 +76,35 @@ macro_rules! proto_message_mappings {
             )*
         }
 
-        // Generate the parse_proto_message function
-        pub fn parse_proto_message(message_type: usize, buf: &[u8]) -> Result<ProtoMessage, &'static str> {
-            match message_type {
-                $(
-                    $type_id => $struct::decode(buf)
-                        .map(ProtoMessage::$struct)
-                        .map_err(|_| concat!("Failed to decode ", stringify!($struct))),
-                )*
-                _ => Err(Box::leak(format!("Unknown message type: {}", message_type).into_boxed_str())),
+        impl ProtoMessage {
+            /// Parses a message from a message type and content.
+            pub fn parse(message_type: u8, buf: &[u8]) -> Result<Self, ParseError> {
+                match message_type {
+                    $(
+                        $type_id => $struct::decode(buf)
+                            .map(Self::$struct)
+                            .map_err(|_| ParseError::FailedToDecode(stringify!($struct))),
+                    )*
+                    message_type => Err(ParseError::UnknownMessageType(message_type)),
+                }
             }
-        }
 
-        pub fn proto_to_vec(message: &ProtoMessage) -> Result<Vec<u8>, &'static str> {
-            match message {
-                $(
-                    ProtoMessage::$struct(msg) => {
-
-                        Ok(msg.encode_to_vec())
-                    }
-                )*
+            /// Encodes the message to bytes.
+            pub fn to_bytes(&self) -> Vec<u8> {
+                match self {
+                    $(
+                        ProtoMessage::$struct(msg) => msg.encode_to_vec(),
+                    )*
+                }
             }
-        }
 
-        // Generate the parse_proto_message function
-        pub fn message_to_num(message_type: &ProtoMessage) -> Result<u8, &'static str> {
-            match message_type {
-                $(
-                    ProtoMessage::$struct(_) => Ok($type_id),
-                )*
+            // Returns the message type as a number.
+            pub fn message_type(&self) -> u8 {
+                match &self {
+                    $(
+                        ProtoMessage::$struct(_) => $type_id,
+                    )*
+                }
             }
         }
     };
