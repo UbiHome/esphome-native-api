@@ -73,7 +73,20 @@ use crate::proto::{
 
 macro_rules! proto_message_mappings {
     ($($type_id:expr => $struct:ident),* $(,)?) => {
-        // Generate the ProtoMessage enum
+        /// Enumeration of all ESPHome native API message types.
+        ///
+        /// This enum represents every possible message type in the ESPHome protocol,
+        /// providing a type-safe way to work with protocol messages. Each variant
+        /// contains the corresponding protocol buffer message struct.
+        ///
+        /// # Examples
+        ///
+        /// ```rust
+        /// use esphome_native_api::parser::ProtoMessage;
+        /// use esphome_native_api::proto::PingRequest;
+        ///
+        /// let message = ProtoMessage::PingRequest(PingRequest {});
+        /// ```
         #[derive(Clone, Debug)]
         pub enum ProtoMessage {
             $(
@@ -81,7 +94,22 @@ macro_rules! proto_message_mappings {
             )*
         }
 
-        // Generate the parse_proto_message function
+        /// Parses a binary protocol buffer message into a [`ProtoMessage`].
+        ///
+        /// # Arguments
+        ///
+        /// * `message_type` - The numeric message type identifier
+        /// * `buf` - The protocol buffer encoded message data
+        ///
+        /// # Returns
+        ///
+        /// Returns the parsed message on success.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if:
+        /// - The message type is unknown
+        /// - The protocol buffer data is invalid or corrupted
         pub fn parse_proto_message(message_type: usize, buf: &[u8]) -> Result<ProtoMessage, &'static str> {
             match message_type {
                 $(
@@ -93,6 +121,19 @@ macro_rules! proto_message_mappings {
             }
         }
 
+        /// Encodes a [`ProtoMessage`] to a protocol buffer byte vector.
+        ///
+        /// # Arguments
+        ///
+        /// * `message` - The message to encode
+        ///
+        /// # Returns
+        ///
+        /// Returns the encoded message bytes on success.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if protocol buffer encoding fails.
         pub fn proto_to_vec(message: &ProtoMessage) -> Result<Vec<u8>, &'static str> {
             match message {
                 $(
@@ -104,7 +145,19 @@ macro_rules! proto_message_mappings {
             }
         }
 
-        // Generate the parse_proto_message function
+        /// Converts a [`ProtoMessage`] to its numeric message type identifier.
+        ///
+        /// # Arguments
+        ///
+        /// * `message_type` - The message to get the type identifier for
+        ///
+        /// # Returns
+        ///
+        /// Returns the numeric message type identifier.
+        ///
+        /// # Errors
+        ///
+        /// This function should not fail for valid `ProtoMessage` variants.
         pub fn message_to_num(message_type: &ProtoMessage) -> Result<u8, &'static str> {
             match message_type {
                 $(
