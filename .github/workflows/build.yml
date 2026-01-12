@@ -217,7 +217,7 @@ jobs:
           RUSTFLAGS: "-D warnings"
           RUSTDOCFLAGS: "-D warnings"
         with:
-          command: doc
+          command: doc -p esphome-native-api
           target: x86_64-unknown-linux-musl
 
       
