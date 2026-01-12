@@ -1,3 +1,31 @@
+//! Example: Plaintext ESPHome test server
+//!
+//! This example demonstrates how to create an ESPHome server that handles
+//! plaintext (unencrypted) connections. It shows how to:
+//!
+//! - Set up a plaintext server without encryption
+//! - Register multiple entity types (binary sensors, buttons, lights, sensors, switches)
+//! - Handle entity list requests
+//! - Send periodic sensor state updates
+//! - Manage concurrent connections
+//!
+//! # Usage
+//!
+//! Run with:
+//! ```bash
+//! cargo run --example test_server
+//! ```
+//!
+//! Set a custom port:
+//! ```bash
+//! SERVER_PORT=6053 cargo run --example test_server
+//! ```
+//!
+//! # Security Note
+//!
+//! This example uses plaintext communication for testing and development.
+//! For production use, prefer encrypted connections using the `encrypted_server` example.
+
 use std::env;
 use std::{future, net::SocketAddr, time::Duration};
 

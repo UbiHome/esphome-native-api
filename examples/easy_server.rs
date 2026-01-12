@@ -1,3 +1,27 @@
+//! Example: Easy server setup (work in progress)
+//!
+//! This example is currently under development and demonstrates how to use
+//! the higher-level `EspHomeServer` abstraction for easier setup and entity
+//! management.
+//!
+//! # Status
+//!
+//! Most of the server setup code is currently commented out as this example
+//! is being refined. See `test_server.rs` or `encrypted_server.rs` for
+//! working examples.
+//!
+//! # Usage
+//!
+//! Run with:
+//! ```bash
+//! cargo run --example easy_server
+//! ```
+//!
+//! Set a custom port:
+//! ```bash
+//! SERVER_PORT=6053 cargo run --example easy_server
+//! ```
+
 use std::env;
 use std::{future, net::SocketAddr, time::Duration};
 

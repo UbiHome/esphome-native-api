@@ -1,3 +1,32 @@
+//! Example: Encrypted ESPHome server
+//!
+//! This example demonstrates how to create an ESPHome server that handles
+//! encrypted connections using the Noise protocol framework. It shows how to:
+//!
+//! - Set up an encrypted server with an encryption key
+//! - Handle entity list requests
+//! - Send sensor state updates
+//! - Manage multiple concurrent connections
+//!
+//! # Usage
+//!
+//! Run with:
+//! ```bash
+//! cargo run --example encrypted_server
+//! ```
+//!
+//! Set a custom port:
+//! ```bash
+//! SERVER_PORT=6053 cargo run --example encrypted_server
+//! ```
+//!
+//! # Configuration
+//!
+//! The server uses a hardcoded encryption key for demonstration purposes.
+//! In production, this should be generated securely and stored appropriately.
+//!
+//! Encryption key: `px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA=`
+
 use std::env;
 use std::{future, net::SocketAddr, time::Duration};
 
