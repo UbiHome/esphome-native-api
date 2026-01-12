@@ -29,3 +29,15 @@ uv run pytest
 uv tool install tox --with tox-uv
 
 ```
+
+## Documentation
+
+Run `cargo doc` to generate a local documentation of all crates.
+
+For working on this package documentation use:
+
+```bash
+cargo doc -p some-dependency
+cd target/doc/esphome_native_api/
+npx http-server
+```

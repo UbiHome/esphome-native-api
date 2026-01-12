@@ -1,3 +1,36 @@
+//! High-level ESPHome server implementation with entity management.
+//!
+//! This module provides the [`EspHomeServer`] abstraction, which simplifies working with
+//! ESPHome devices by managing entities. It builds on top of the
+//! lower-level [`crate::esphomeapi::EspHomeApi`] and handles entity registration and
+//! message routing automatically.
+//!
+//! # Examples
+//!
+//! ```rust,no_run
+//! use esphome_native_api::esphomeserver::{EspHomeServer, Entity, BinarySensor};
+//! use tokio::net::TcpStream;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let stream = TcpStream::connect("192.168.1.100:6053").await?;
+//!     
+//!     let mut server = EspHomeServer::builder()
+//!         .name("my-server".to_string())
+//!         .build();
+//!     
+//!     // Add entities
+//!     let sensor = Entity::BinarySensor(BinarySensor {
+//!         object_id: "door_sensor".to_string(),
+//!     });
+//!     server.add_entity("door_sensor", sensor);
+//!     
+//!     let (tx, mut rx) = server.start(stream).await?;
+//!     
+//!     Ok(())
+//! }
+//! ```
+
 #![allow(dead_code)]
 
 use log::debug;
@@ -21,6 +54,27 @@ use crate::esphomeapi::EspHomeApi;
 use crate::parser::ProtoMessage;
 use crate::proto::ListEntitiesDoneResponse;
 
+/// High-level ESPHome server implementation.
+///
+/// `EspHomeServer` provides an easier-to-use abstraction over the ESPHome native API
+/// by managing entity keys internally. It handles entity registration, message routing,
+/// and maintains state for all registered entities.
+///
+/// This struct uses the builder pattern via the [`TypedBuilder`] derive macro,
+/// allowing for flexible configuration.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use esphome_native_api::esphomeserver::EspHomeServer;
+///
+/// let server = EspHomeServer::builder()
+///     .name("my-device".to_string())
+///     .api_version_major(1)
+///     .api_version_minor(10)
+///     .encryption_key("your-base64-key".to_string())
+///     .build();
+/// ```
 #[derive(TypedBuilder)]
 pub struct EspHomeServer {
     // Private fields
@@ -81,6 +135,39 @@ pub struct EspHomeServer {
 ///
 /// Manages entity keys internally.
 impl EspHomeServer {
+    /// Starts the ESPHome server and begins communication over the provided TCP stream.
+    ///
+    /// This method initializes the underlying [`EspHomeApi`], establishes the connection,
+    /// and spawns a background task to handle message routing between the API and
+    /// registered entities.
+    ///
+    /// # Arguments
+    ///
+    /// * `tcp_stream` - An established TCP connection to an ESPHome device
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple containing:
+    /// - A sender for outgoing messages to the ESPHome device
+    /// - A receiver for incoming messages from the ESPHome device
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection cannot be established or if the initial
+    /// handshake fails.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use esphome_native_api::esphomeserver::EspHomeServer;
+    /// # use tokio::net::TcpStream;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let stream = TcpStream::connect("192.168.1.100:6053").await?;
+    /// let mut server = EspHomeServer::builder().name("client".to_string()).build();
+    /// let (tx, mut rx) = server.start(stream).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn start(
         &mut self,
         tcp_stream: TcpStream,
@@ -149,6 +236,26 @@ impl EspHomeServer {
         Ok((messages_tx.clone(), outgoing_messages_rx))
     }
 
+    /// Adds an entity to the server's internal registry.
+    ///
+    /// Each entity is assigned a unique key that is managed internally. The entity
+    /// can be referenced by its string identifier in subsequent operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `entity_id` - A unique string identifier for the entity
+    /// * `entity` - The entity to register
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use esphome_native_api::esphomeserver::{EspHomeServer, Entity, BinarySensor};
+    /// let mut server = EspHomeServer::builder().name("server".to_string()).build();
+    /// let sensor = Entity::BinarySensor(BinarySensor {
+    ///     object_id: "motion_sensor".to_string(),
+    /// });
+    /// server.add_entity("motion", sensor);
+    /// ```
     pub fn add_entity(&mut self, entity_id: &str, entity: Entity) {
         self.components_key_id
             .insert(entity_id.to_string(), self.current_key);
@@ -158,12 +265,23 @@ impl EspHomeServer {
     }
 }
 
+/// Represents different types of entities supported by ESPHome.
+///
+/// This enum contains all entity types that can be registered with the server.
+/// Currently, only binary sensors are implemented, but this will expand to include
+/// other entity types like switches, lights, sensors, etc.
 #[derive(Clone, Debug)]
 pub enum Entity {
+    /// A binary sensor entity (on/off state)
     BinarySensor(BinarySensor),
 }
 
+/// Represents a binary sensor entity.
+///
+/// Binary sensors report a simple on/off or true/false state, such as
+/// door/window sensors, motion detectors, or binary switches.
 #[derive(Clone, Debug)]
 pub struct BinarySensor {
+    /// The unique object identifier for this binary sensor
     pub object_id: String,
 }

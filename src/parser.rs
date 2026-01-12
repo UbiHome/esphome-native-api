@@ -1,3 +1,5 @@
+#![doc(hidden)]
+
 // TODO: Parser should part of the proto generator
 
 use prost::Message;
@@ -42,18 +44,18 @@ use crate::proto::{
     VoiceAssistantEventResponse, VoiceAssistantRequest, VoiceAssistantResponse,
     VoiceAssistantSetConfiguration, VoiceAssistantTimerEventResponse,
 };
-
 macro_rules! proto_message_mappings {
     ($($type_id:expr => $struct:ident),* $(,)?) => {
-        // Generate the ProtoMessage enum
+        #[doc(hidden)]
         #[derive(Clone, Debug)]
         pub enum ProtoMessage {
             $(
+                /// ProtoMessage for $struct
                 $struct($struct),
             )*
         }
 
-        // Generate the parse_proto_message function
+        #[doc(hidden)]
         pub fn parse_proto_message(message_type: usize, buf: &[u8]) -> Result<ProtoMessage, &'static str> {
             match message_type {
                 $(
@@ -65,6 +67,7 @@ macro_rules! proto_message_mappings {
             }
         }
 
+        #[doc(hidden)]
         pub fn proto_to_vec(message: &ProtoMessage) -> Result<Vec<u8>, &'static str> {
             match message {
                 $(
@@ -76,7 +79,7 @@ macro_rules! proto_message_mappings {
             }
         }
 
-        // Generate the parse_proto_message function
+        #[doc(hidden)]
         pub fn message_to_num(message_type: &ProtoMessage) -> Result<u8, &'static str> {
             match message_type {
                 $(
