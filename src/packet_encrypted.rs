@@ -1,3 +1,41 @@
+//! Encrypted packet encoding and decoding.
+//!
+//! This module provides functions for converting between [`ProtoMessage`] enums
+//! and binary packet format for encrypted communication using the Noise protocol.
+//!
+//! # Packet Format
+//!
+//! Encrypted packets consist of:
+//! - 2 bytes: Message type identifier (big-endian u16)
+//! - 2 bytes: Message length (big-endian u16)
+//! - N bytes: Protocol buffer encoded message content
+//! - 16 bytes: Authentication tag (added by encryption)
+//!
+//! All data after the initial framing is encrypted using ChaCha20-Poly1305.
+//!
+//! # Examples
+//!
+//! ```rust,no_run
+//! use esphome_native_api::packet_encrypted::{message_to_packet, packet_to_message};
+//! use esphome_native_api::parser::ProtoMessage;
+//! use esphome_native_api::proto::PingRequest;
+//! use noise_protocol::CipherState;
+//! use noise_rust_crypto::ChaCha20Poly1305;
+//!
+//! # fn example(
+//! #     encrypt_cipher: &mut CipherState<ChaCha20Poly1305>,
+//! #     decrypt_cipher: &mut CipherState<ChaCha20Poly1305>
+//! # ) -> Result<(), Box<dyn std::error::Error>> {
+//! // Encrypt and encode a message
+//! let message = ProtoMessage::PingRequest(PingRequest {});
+//! let packet = message_to_packet(&message, encrypt_cipher)?;
+//!
+//! // Decrypt and decode a packet
+//! let decoded = packet_to_message(&packet, decrypt_cipher)?;
+//! # Ok(())
+//! # }
+//! ```
+
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
 use log::debug;
@@ -7,6 +45,20 @@ use noise_rust_crypto::ChaCha20Poly1305;
 use crate::parser;
 pub use parser::ProtoMessage;
 
+/// Generates the server hello frame for encrypted connections.
+///
+/// Creates the initial handshake frame sent by the server when establishing
+/// an encrypted connection. This frame includes the server name and optionally
+/// the MAC address.
+///
+/// # Arguments
+///
+/// * `name` - The server name
+/// * `mac` - Optional MAC address
+///
+/// # Returns
+///
+/// Returns the binary server hello frame.
 pub fn generate_server_hello_frame(name: String, mac: Option<String>) -> Vec<u8> {
     let mut message_server_hello: Vec<u8> = Vec::new();
 
@@ -22,6 +74,26 @@ pub fn generate_server_hello_frame(name: String, mac: Option<String>) -> Vec<u8>
     message_server_hello
 }
 
+/// Decrypts and decodes an encrypted packet to a [`ProtoMessage`].
+///
+/// Takes an encrypted packet, decrypts it using the provided cipher state,
+/// and then decodes the protocol buffer message.
+///
+/// # Arguments
+///
+/// * `buffer` - The encrypted packet data
+/// * `cipher_decrypt` - The cipher state for decryption
+///
+/// # Returns
+///
+/// Returns the decoded [`ProtoMessage`] on success.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Decryption fails (e.g., authentication tag verification fails)
+/// - The message type is unknown
+/// - The protocol buffer data is invalid
 pub fn packet_to_message(
     buffer: &[u8],
     cipher_decrypt: &mut CipherState<ChaCha20Poly1305>,
@@ -36,6 +108,25 @@ pub fn packet_to_message(
     Ok(parser::parse_proto_message(message_type, packet_content).unwrap())
 }
 
+/// Encodes and encrypts a [`ProtoMessage`] to a binary packet.
+///
+/// Encodes the message as a protocol buffer, prepends the message type and length,
+/// and then encrypts the entire packet using the provided cipher state.
+///
+/// # Arguments
+///
+/// * `message` - The message to encode and encrypt
+/// * `cipher_encrypt` - The cipher state for encryption
+///
+/// # Returns
+///
+/// Returns the encrypted binary packet data on success.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Protocol buffer encoding fails
+/// - Encryption fails
 pub fn message_to_packet(
     message: &ProtoMessage,
     cipher_encrypt: &mut CipherState<ChaCha20Poly1305>,

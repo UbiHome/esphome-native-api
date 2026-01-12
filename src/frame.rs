@@ -1,3 +1,30 @@
+//! Frame encoding and decoding for the ESPHome native API.
+//!
+//! This module implements the framing protocol used by ESPHome for message
+//! transmission over TCP. It provides a codec that handles both encrypted
+//! and plaintext frame formats.
+//!
+//! # Frame Format
+//!
+//! ## Plaintext Frames
+//!
+//! Plaintext frames use the following format:
+//! - 1 byte: Frame type (0x00 for plaintext)
+//! - Variable-length varint: Message length
+//! - N bytes: Message data
+//!
+//! ## Encrypted Frames
+//!
+//! Encrypted frames use a fixed-length format:
+//! - 1 byte: Frame type (0x01 for encrypted)
+//! - 2 bytes: Message length (big-endian u16)
+//! - N bytes: Encrypted message data
+//!
+//! # Usage
+//!
+//! This module is used internally by [`crate::esphomeapi::EspHomeApi`] and is
+//! not typically used directly by application code.
+
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
 use log::debug;
@@ -9,12 +36,47 @@ use bytes::{Buf, BytesMut};
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Encoder;
 
+/// Codec for encoding and decoding ESPHome protocol frames.
+///
+/// `FrameCodec` implements the Tokio [`Decoder`] and [`Encoder`] traits to handle
+/// frame-based message transmission. It supports both plaintext and encrypted frames.
+///
+/// # Frame Types
+///
+/// - Plaintext frames (prefix 0x00): Use variable-length encoding for frame size
+/// - Encrypted frames (prefix 0x01): Use fixed 2-byte big-endian encoding for frame size
+///
+/// # Examples
+///
+/// ```rust
+/// use esphome_native_api::frame::FrameCodec;
+///
+/// // Create a codec for plaintext frames
+/// let codec = FrameCodec::new(false);
+///
+/// // Create a codec for encrypted frames
+/// let encrypted_codec = FrameCodec::new(true);
+/// ```
 pub struct FrameCodec {
     encrypted: bool,
     max_length: usize,
 }
 
 impl FrameCodec {
+    /// Creates a new `FrameCodec`.
+    ///
+    /// # Arguments
+    ///
+    /// * `encrypted` - If `true`, uses encrypted frame format; if `false`, uses plaintext
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use esphome_native_api::frame::FrameCodec;
+    ///
+    /// let plaintext_codec = FrameCodec::new(false);
+    /// let encrypted_codec = FrameCodec::new(true);
+    /// ```
     pub fn new(encrypted: bool) -> Self {
         FrameCodec {
             encrypted,

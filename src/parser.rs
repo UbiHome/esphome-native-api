@@ -1,3 +1,31 @@
+//! Protocol message parsing and serialization.
+//!
+//! This module provides the [`ProtoMessage`] enum that represents all possible
+//! message types in the ESPHome native API protocol, along with functions for
+//! converting between protocol buffer binary format and Rust types.
+//!
+//! # Message Types
+//!
+//! The ESPHome protocol uses protocol buffers for message encoding. This module
+//! handles the conversion between:
+//! - Binary protocol buffer data
+//! - Strongly-typed Rust enums and structs
+//! - Message type identifiers
+//!
+//! # Examples
+//!
+//! ```rust
+//! use esphome_native_api::parser::ProtoMessage;
+//! use esphome_native_api::proto::HelloRequest;
+//!
+//! // Create a message
+//! let message = ProtoMessage::HelloRequest(HelloRequest {
+//!     client_info: "my-client".to_string(),
+//!     api_version_major: 1,
+//!     api_version_minor: 10,
+//! });
+//! ```
+
 // TODO: Parser should part of the proto generator
 
 use prost::Message;

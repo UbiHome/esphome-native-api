@@ -3,12 +3,13 @@ name = "esphome-native-api"
 version = "0.0.0"
 edition = "2024"
 license = "MIT"
-keywords = ["esphome", "homeassistant"]
-categories = ["api-bindings"]
-homepage = "https://github.com/DanielHabenicht/esphome-native-api"
-repository = "https://github.com/DanielHabenicht/esphome-native-api"
+keywords = ["esphome", "homeassistant", "iot", "smart-home"]
+categories = ["api-bindings", "network-programming"]
+homepage = "https://github.com/UbiHome/esphome-native-api"
+repository = "https://github.com/UbiHome/esphome-native-api"
+documentation = "https://docs.rs/esphome-native-api"
 readme = "README.md"
-description = "Another package for communication via esp home native API."
+description = "Rust implementation of the ESPHome native API for communication with ESPHome devices, supporting both encrypted and plaintext connections."
 include = [
     "/LICENSE",
     "/README.md",

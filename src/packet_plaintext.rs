@@ -1,8 +1,52 @@
+//! Plaintext packet encoding and decoding.
+//!
+//! This module provides functions for converting between [`ProtoMessage`] enums
+//! and binary packet format for plaintext (unencrypted) communication.
+//!
+//! # Packet Format
+//!
+//! Plaintext packets consist of:
+//! - 1 byte: Message type identifier
+//! - N bytes: Protocol buffer encoded message content
+//!
+//! # Examples
+//!
+//! ```rust
+//! use esphome_native_api::packet_plaintext::{message_to_packet, packet_to_message};
+//! use esphome_native_api::parser::ProtoMessage;
+//! use esphome_native_api::proto::PingRequest;
+//!
+//! // Convert message to packet
+//! let message = ProtoMessage::PingRequest(PingRequest {});
+//! let packet = message_to_packet(&message).unwrap();
+//!
+//! // Convert packet back to message
+//! let decoded = packet_to_message(&packet).unwrap();
+//! ```
+
 use log::debug;
 
 use crate::parser;
 pub use parser::ProtoMessage;
 
+/// Converts a binary packet to a [`ProtoMessage`].
+///
+/// Parses a plaintext packet by extracting the message type from the first byte
+/// and then decoding the remaining bytes as a protocol buffer message.
+///
+/// # Arguments
+///
+/// * `buffer` - The binary packet data, including the message type byte
+///
+/// # Returns
+///
+/// Returns the decoded [`ProtoMessage`] on success.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The message type is unknown
+/// - The protocol buffer data is invalid
 pub fn packet_to_message(buffer: &[u8]) -> Result<ProtoMessage, Box<dyn std::error::Error>> {
     let message_type = buffer[0] as usize;
     let packet_content = &buffer[1..];
@@ -11,6 +55,22 @@ pub fn packet_to_message(buffer: &[u8]) -> Result<ProtoMessage, Box<dyn std::err
     Ok(parser::parse_proto_message(message_type, packet_content).unwrap())
 }
 
+/// Converts a [`ProtoMessage`] to a binary packet.
+///
+/// Encodes a message by first encoding it as a protocol buffer, then prepending
+/// the message type identifier byte.
+///
+/// # Arguments
+///
+/// * `message` - The message to encode
+///
+/// # Returns
+///
+/// Returns the binary packet data on success.
+///
+/// # Errors
+///
+/// Returns an error if the protocol buffer encoding fails.
 pub fn message_to_packet(message: &ProtoMessage) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let response_content = parser::proto_to_vec(message)?;
     let message_type = parser::message_to_num(message)?;
