@@ -9,7 +9,7 @@ use bytes::{Buf, BytesMut};
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Encoder;
 
-pub struct FrameCodec {
+pub(crate) struct FrameCodec {
     encrypted: bool,
     max_length: usize,
 }

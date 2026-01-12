@@ -1,3 +1,50 @@
+//! Low-level ESPHome native API implementation.
+//!
+//! This module provides [`EspHomeApi`], which handles the core protocol communication
+//! with ESPHome devices. It manages connection establishment, encryption handshakes,
+//! message framing, and protocol state.
+//!
+//! # Examples
+//!
+//! ## Plaintext Connection
+//!
+//! ```rust,no_run
+//! use esphome_native_api::esphomeapi::EspHomeApi;
+//! use tokio::net::TcpStream;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let stream = TcpStream::connect("192.168.1.100:6053").await?;
+//!     
+//!     let mut api = EspHomeApi::builder()
+//!         .name("my-client".to_string())
+//!         .build();
+//!     
+//!     let (tx, mut rx) = api.start(stream).await?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Encrypted Connection
+//!
+//! ```rust,no_run
+//! use esphome_native_api::esphomeapi::EspHomeApi;
+//! use tokio::net::TcpStream;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let stream = TcpStream::connect("192.168.1.100:6053").await?;
+//!     
+//!     let mut api = EspHomeApi::builder()
+//!         .name("my-client".to_string())
+//!         .encryption_key("your-base64-encoded-key".to_string())
+//!         .build();
+//!     
+//!     let (tx, mut rx) = api.start(stream).await?;
+//!     Ok(())
+//! }
+//! ```
+
 use base64::prelude::*;
 use futures::sink::SinkExt;
 use log::debug;
@@ -48,6 +95,41 @@ async fn write_error_and_disconnect(
 const ERROR_ONLY_ENCRYPTED: &str = "Only key encryption is enabled";
 const ERROR_HANDSHAKE_MAC_FAILURE: &str = "Handshake MAC failure";
 
+/// Low-level ESPHome native API client.
+///
+/// `EspHomeApi` provides direct access to the ESPHome native API protocol,
+/// handling connection setup, encryption, and message framing. This is the
+/// lower-level API that [`crate::esphomeserver::EspHomeServer`] builds upon.
+///
+/// This struct supports both encrypted and plaintext connections and uses
+/// the builder pattern for configuration via [`TypedBuilder`].
+///
+/// # Builder Options
+///
+/// - `name`: Device name (required)
+/// - `encryption_key`: Base64-encoded encryption key (optional, enables encryption)
+/// - `api_version_major`: API version major number (default: 1)
+/// - `api_version_minor`: API version minor number (default: 10)
+/// - `server_info`: Server identification string (default: "Rust: esphome-native-api")
+/// - `friendly_name`: Human-readable device name (optional)
+/// - `mac`: MAC address (optional)
+/// - `model`: Device model (optional)
+/// - `manufacturer`: Device manufacturer (optional)
+/// - `suggested_area`: Suggested area for the device (optional)
+/// - `bluetooth_mac_address`: Bluetooth MAC address (optional)
+///
+/// # Examples
+///
+/// ```rust
+/// use esphome_native_api::esphomeapi::EspHomeApi;
+///
+/// let api = EspHomeApi::builder()
+///     .name("bedroom-light".to_string())
+///     .api_version_major(1)
+///     .api_version_minor(10)
+///     .friendly_name("Bedroom Light".to_string())
+///     .build();
+/// ```
 #[derive(TypedBuilder, Clone)]
 pub struct EspHomeApi {
     // Private fields
@@ -108,10 +190,46 @@ pub struct EspHomeApi {
     voice_assistant_feature_flags: u32,
 }
 
-/// Handles the EspHome Api, with encryption etc.
+/// Handles the ESPHome API protocol with encryption support.
 impl EspHomeApi {
-    /// Starts the server and returns a broadcast channel for messages, and a
-    /// broadcast receiver for all messages not handled by the abstraction
+    /// Starts the API client and establishes communication with an ESPHome device.
+    ///
+    /// This method performs the complete connection handshake, including:
+    /// 1. Detecting whether encryption is required
+    /// 2. Performing encryption handshake if needed
+    /// 3. Exchanging hello messages
+    /// 4. Setting up message routing
+    ///
+    /// # Arguments
+    ///
+    /// * `tcp_stream` - An established TCP connection to the ESPHome device
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple containing:
+    /// - An `mpsc::Sender` for sending messages to the device
+    /// - A `broadcast::Receiver` for receiving messages from the device
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The connection fails
+    /// - The encryption handshake fails
+    /// - The hello exchange fails
+    /// - The device requires encryption but no key was provided
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use esphome_native_api::esphomeapi::EspHomeApi;
+    /// # use tokio::net::TcpStream;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let stream = TcpStream::connect("192.168.1.100:6053").await?;
+    /// let mut api = EspHomeApi::builder().name("client".to_string()).build();
+    /// let (tx, mut rx) = api.start(stream).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn start(
         &mut self,
         tcp_stream: TcpStream,

@@ -7,7 +7,7 @@ use noise_rust_crypto::ChaCha20Poly1305;
 use crate::parser;
 pub use parser::ProtoMessage;
 
-pub fn generate_server_hello_frame(name: String, mac: Option<String>) -> Vec<u8> {
+pub(crate) fn generate_server_hello_frame(name: String, mac: Option<String>) -> Vec<u8> {
     let mut message_server_hello: Vec<u8> = Vec::new();
 
     let encryption_protocol: Vec<u8> = vec![1];
@@ -22,7 +22,7 @@ pub fn generate_server_hello_frame(name: String, mac: Option<String>) -> Vec<u8>
     message_server_hello
 }
 
-pub fn packet_to_message(
+pub(crate) fn packet_to_message(
     buffer: &[u8],
     cipher_decrypt: &mut CipherState<ChaCha20Poly1305>,
 ) -> Result<ProtoMessage, Box<dyn std::error::Error>> {
@@ -36,7 +36,7 @@ pub fn packet_to_message(
     Ok(parser::parse_proto_message(message_type, packet_content).unwrap())
 }
 
-pub fn message_to_packet(
+pub(crate) fn message_to_packet(
     message: &ProtoMessage,
     cipher_encrypt: &mut CipherState<ChaCha20Poly1305>,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {

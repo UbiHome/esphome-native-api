@@ -18,7 +18,8 @@ clean:
 
 # Test the application
 test:
-	cargo test
+    cargo test
+	cargo test --doc
 
 e2e-test:
 	cd tests

@@ -109,8 +109,7 @@ jobs:
         with:
           command: build
           target: ${{ matrix.platform.target }}
-          # Add "--locked" again when release please is not updating all Cargo.toml files
-          args: "--release"
+          args: "--release --locked"
           strip: false
 
       - name: Test binary
@@ -118,8 +117,7 @@ jobs:
         with:
           command: test
           target: ${{ matrix.platform.target }}
-          # Add "--locked" again when release please is not updating all Cargo.toml files
-          args: "--verbose"
+          args: "--verbose --locked"
           strip: false
 
   e2e-test:
@@ -194,3 +192,39 @@ jobs:
   #       run: |-
   #         cd tests
   #         uv run pytest
+  docs_rs:
+    name: Check Docs.rs generation
+    runs-on: ubuntu-latest
+    needs: generate_protos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      - name: Download proto source files
+        uses: actions/download-artifact@v4
+        with:
+          name: proto_src_files
+          path: src/proto
+      - name: Download cargo.toml
+        uses: actions/download-artifact@v4
+        with:
+          name: cargo_toml
+
+      - name: Generate Doc
+        uses: houseabsolute/actions-rust-cross@v1
+        env:
+          RUSTFLAGS: "-D warnings"
+          RUSTDOCFLAGS: "-D warnings"
+        with:
+          command: doc -p esphome-native-api
+          target: x86_64-unknown-linux-musl
+
+      
+      - name: Text Doc Examples
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: test --doc
+          target: x86_64-unknown-linux-musl
+          args: "--verbose --locked"
+          strip: false
