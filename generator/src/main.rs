@@ -101,7 +101,7 @@ async fn main() {
             }
 
             mod_file_content.push_str(&format!(
-                "\npub mod {package_name};\n#[cfg(feature = {package_name:?})]\npub use {package_name}::*;\n#[cfg(feature = {package_name:?})]\npub(crate) const VERSION: &str = {package_version:?};\n"
+                "\n#[cfg(feature = {package_name:?})]\npub mod {package_name};\n#[cfg(feature = {package_name:?})]\npub use {package_name}::*;\n#[cfg(feature = {package_name:?})]\npub(crate) const VERSION: &str = {package_version:?};\n"
             ));
 
             let write_dir = root_output_dir.join(&package_name);
