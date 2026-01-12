@@ -200,12 +200,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+
+      - name: Download proto source files
+        uses: actions/download-artifact@v4
+        with:
+          name: proto_src_files
+          path: src/proto
       - name: Download cargo.toml
         uses: actions/download-artifact@v4
         with:
           name: cargo_toml
 
-      - name: Lint code
+      - name: Generate Doc
         uses: houseabsolute/actions-rust-cross@v1
         env:
           RUSTFLAGS: "-D warnings"
@@ -215,10 +221,10 @@ jobs:
           target: x86_64-unknown-linux-musl
 
       
-      - name: Test binary
+      - name: Text Doc Examples
         uses: houseabsolute/actions-rust-cross@v1
         with:
-          command: test
+          command: test --doc
           target: x86_64-unknown-linux-musl
           args: "--verbose --locked"
           strip: false
