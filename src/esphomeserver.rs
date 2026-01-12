@@ -65,7 +65,7 @@ use crate::proto::ListEntitiesDoneResponse;
 ///
 /// # Examples
 ///
-/// ```rust,no_run
+/// ```rust
 /// use esphome_native_api::esphomeserver::EspHomeServer;
 ///
 /// let server = EspHomeServer::builder()
