@@ -1,6 +1,7 @@
-use crate::parser;
-pub use crate::parser::ProtoMessage;
 use log::debug;
+
+use crate::parser;
+pub use parser::ProtoMessage;
 
 pub fn packet_to_message(buffer: &[u8]) -> Result<ProtoMessage, Box<dyn std::error::Error>> {
     let message_type = buffer[0] as usize;
@@ -22,7 +23,7 @@ pub fn message_to_packet(message: &ProtoMessage) -> Result<Vec<u8>, Box<dyn std:
 mod tests {
     use test_log::test;
 
-    use crate::proto::version_2025_12_1::HelloRequest;
+    use crate::proto::HelloRequest;
 
     use super::*;
 

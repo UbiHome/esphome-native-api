@@ -311,7 +311,7 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn hello_message_short() {
-        let hello_message = ProtoMessage::HelloResponse(proto::version_2025_12_1::HelloResponse {
+        let hello_message = ProtoMessage::HelloResponse(proto::HelloResponse {
             api_version_major: 1,
             api_version_minor: 1,
             server_info: "Test Server".to_string(),
@@ -350,7 +350,7 @@ mod tests {
     #[test_log::test]
     async fn hello_message_short_encrypted() {
         // Arrange
-        let hello_message = ProtoMessage::HelloResponse(proto::version_2025_12_1::HelloResponse {
+        let hello_message = ProtoMessage::HelloResponse(proto::HelloResponse {
             api_version_major: 1,
             api_version_minor: 1,
             server_info: "Test Server".to_string(),
@@ -387,7 +387,7 @@ mod tests {
         // Test that varint length encoding works correctly for long strings
 
         let hello_message = ProtoMessage::HelloResponse(
-            proto::version_2025_12_1::HelloResponse {
+            proto::HelloResponse {
             api_version_major: 1,
             api_version_minor: 1,
             server_info: "Test Server".to_string(),
@@ -425,7 +425,7 @@ mod tests {
     #[test_log::test]
     async fn hello_message_overall_length_varint_longer() {
         let hello_message = ProtoMessage::HelloResponse(
-            proto::version_2025_12_1::HelloResponse {
+            proto::HelloResponse {
             api_version_major: 1,
             api_version_minor: 1,
             server_info: "Test Server".to_string(),
@@ -462,7 +462,7 @@ mod tests {
     #[test_log::test]
     async fn hello_message_longer() {
         let hello_message: ProtoMessage = ProtoMessage::HelloResponse(
-            proto::version_2025_12_1::HelloResponse {
+            proto::HelloResponse {
             api_version_major: 1,
             api_version_minor: 1,
             server_info: "Test Server".to_string(),

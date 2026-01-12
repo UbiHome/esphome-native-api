@@ -1,14 +1,13 @@
 use std::env;
 use std::{future, net::SocketAddr, time::Duration};
 
-use esphome_native_api::esphomeapi::EspHomeApi;
-use esphome_native_api::parser::ProtoMessage;
-use esphome_native_api::proto::version_2025_12_1::ListEntitiesButtonResponse;
 use esphome_native_api::{
+    esphomeapi::EspHomeApi,
     esphomeserver::EspHomeServer,
-    proto::version_2025_12_1::{
-        ListEntitiesBinarySensorResponse, ListEntitiesLightResponse, ListEntitiesSensorResponse,
-        ListEntitiesSwitchResponse, SensorStateResponse,
+    parser::ProtoMessage,
+    proto::{
+        ListEntitiesBinarySensorResponse, ListEntitiesButtonResponse, ListEntitiesLightResponse,
+        ListEntitiesSensorResponse, ListEntitiesSwitchResponse, SensorStateResponse,
     },
 };
 use log::{LevelFilter, debug, info};
