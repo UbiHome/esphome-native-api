@@ -64,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ProtoMessage::ListEntitiesBinarySensorResponse(
                         ListEntitiesBinarySensorResponse {
                             object_id: "test_binary_sensor_object_id".to_string(),
-                            key: 3,
+                            key: hash_fnv1(&"test_binary_sensor_object_id".to_string()),
                             name: "test_binary_sensor".to_string(),
                             // unique_id: "test_binary_sensor_unique_id".to_string(),
                             device_id: 0,
@@ -77,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ),
                     ProtoMessage::ListEntitiesButtonResponse(ListEntitiesButtonResponse {
                         object_id: "test_button_object_id".to_string(),
-                        key: 0,
+                        key: hash_fnv1(&"test_button_object_id".to_string()),
                         name: "test_button".to_string(),
                         // unique_id: "test_button_unique_id".to_string(),
                         device_id: 0,
@@ -88,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }),
                     ProtoMessage::ListEntitiesLightResponse(ListEntitiesLightResponse {
                         object_id: "test_light_object_id".to_string(),
-                        key: 4,
+                        key: hash_fnv1(&"test_light_object_id".to_string()),
                         name: "test_light".to_string(),
                         // unique_id: "test_light_unique_id".to_string(),
                         device_id: 0,
@@ -107,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }),
                     ProtoMessage::ListEntitiesSensorResponse(ListEntitiesSensorResponse {
                         object_id: "test_sensor_object_id".to_string(),
-                        key: 2,
+                        key: hash_fnv1(&"test_sensor_object_id".to_string()),
                         name: "test_sensor".to_string(),
                         // unique_id: "test_sensor_unique_id".to_string(),
                         device_id: 0,
@@ -123,7 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }),
                     ProtoMessage::ListEntitiesSwitchResponse(ListEntitiesSwitchResponse {
                         object_id: "test_switch_object_id".to_string(),
-                        key: 1,
+                        key: hash_fnv1(&"test_switch_object_id".to_string()),
                         name: "test_switch".to_string(),
                         device_id: 0,
                         // unique_id: "test_switch_unique_id".to_string(),
@@ -166,7 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ProtoMessage::SubscribeStatesRequest(_) => {
                                 let message =
                                     ProtoMessage::SensorStateResponse(SensorStateResponse {
-                                        key: 2,
+                                        key: hash_fnv1(&"test_sensor_object_id".to_string()),
                                         device_id: 0,
                                         state: 25.0,
                                         missing_state: false,

@@ -17,3 +17,6 @@ pub mod parser;
 // #[cfg(feature = "std")]
 #[cfg(feature = "std")]
 mod packet_encrypted;
+
+#[cfg(feature = "std")]
+pub mod hash;
