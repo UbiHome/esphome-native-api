@@ -12,6 +12,7 @@ use esphome_native_api::{
 };
 use log::{LevelFilter, debug, info};
 use tokio::{net::TcpSocket, signal, time::sleep};
+use esphome_native_api::hash::hash_fnv1;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

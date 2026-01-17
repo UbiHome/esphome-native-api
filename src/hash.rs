@@ -1,3 +1,8 @@
+//! Hash utilities for generating stable 32-bit identifiers.
+//!
+//! This module implements a 32-bit FNV-1 hash function with specific preprocessing
+//! steps just like the ESPHome native API uses for generating entity keys from object IDs.
+
 const FNV1_OFFSET_BASIS: u32 = 2166136261;
 const FNV1_PRIME: u32 = 16777619;
 
@@ -25,6 +30,18 @@ fn to_sanitized_char(c: char) -> char {
     }
 }
 
+/// Compute the 32-bit FNV-1 hash of a name after applying a
+/// snake-case and sanitization pass.
+///
+/// # Examples
+///
+/// ```
+/// use esphome_native_api::hash::hash_fnv1;
+///
+/// // Basic string
+/// let s = "foo".to_string();
+/// assert_eq!(hash_fnv1(&s), 0x408F5E13);
+/// ```
 pub fn hash_fnv1(name: &String) -> u32 {
     let mut hash = FNV1_OFFSET_BASIS;
     for c in name.chars() {

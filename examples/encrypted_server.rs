@@ -1,6 +1,7 @@
 use std::env;
 use std::{future, net::SocketAddr, time::Duration};
 
+use esphome_native_api::hash::hash_fnv1;
 use esphome_native_api::{
     esphomeapi::EspHomeApi,
     parser::ProtoMessage,
