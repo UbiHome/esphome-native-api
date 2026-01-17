@@ -50,7 +50,7 @@ async def test_encrypted_server(encrypted_server: EspHomeTestServer):
 
     assert isinstance(binary_sensor, aioesphomeapi.BinarySensorInfo)
     assert binary_sensor.name == "test_binary_sensor"
-    assert binary_sensor.key == 3
+    assert binary_sensor.key == 3680049306
     assert binary_sensor.icon == "mdi:test-binary-sensor-icon"
     assert binary_sensor.device_class == "test_binary_sensor_device_class"
     assert binary_sensor.disabled_by_default is False
@@ -59,7 +59,7 @@ async def test_encrypted_server(encrypted_server: EspHomeTestServer):
 
     assert isinstance(button, aioesphomeapi.ButtonInfo)
     assert button.name == "test_button"
-    assert button.key == 0
+    assert button.key == 1365147398
     assert button.icon == "mdi:test-button-icon"
     assert button.device_class == "test_button_device_class"
     assert button.disabled_by_default is False
@@ -68,7 +68,7 @@ async def test_encrypted_server(encrypted_server: EspHomeTestServer):
 
     assert isinstance(switch, aioesphomeapi.SwitchInfo)
     assert switch.name == "test_switch"
-    assert switch.key == 1
+    assert switch.key == 2623260150
     assert switch.icon == "mdi:test-switch-icon"
     assert switch.device_class == "test_switch_device_class"
     assert switch.disabled_by_default is False
@@ -77,7 +77,7 @@ async def test_encrypted_server(encrypted_server: EspHomeTestServer):
 
     assert isinstance(light, aioesphomeapi.LightInfo)
     assert light.name == "test_light"
-    assert light.key == 4
+    assert light.key == 1486004846
     assert light.icon == "mdi:test-light-icon"
     assert light.disabled_by_default is False
     assert light.entity_category == aioesphomeapi.EntityCategory.NONE
@@ -85,7 +85,7 @@ async def test_encrypted_server(encrypted_server: EspHomeTestServer):
 
     assert isinstance(sensor, aioesphomeapi.SensorInfo)
     assert sensor.name == "test_sensor"
-    assert sensor.key == 2
+    assert sensor.key == 1812615308
     assert sensor.icon == "mdi:test-sensor-icon"
     assert sensor.disabled_by_default is False
     assert sensor.entity_category == aioesphomeapi.EntityCategory.NONE

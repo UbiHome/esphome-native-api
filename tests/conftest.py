@@ -3,6 +3,7 @@ from asyncio.subprocess import Process
 import os
 from pathlib import Path
 import platform
+import random
 import signal
 import socket
 from typing import Optional
@@ -18,8 +19,12 @@ class EspHomeTestServer:
     _stderr_task = None
     noise_psk = "px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA="
 
-    def __init__(self, name: str = "test_server", port: int = 6053):
+    def __init__(self, name: str = "test_server", port: int | None = None):
         self.name = name
+        if port is None:
+            port = None
+            while port in {6053} or port is None:
+                port = random.randint(1024, 65535)
         self.port = port
 
     async def __aenter__(self):
