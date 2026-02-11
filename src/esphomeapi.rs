@@ -76,7 +76,10 @@ use crate::frame::FrameCodec;
 use crate::packet_encrypted;
 use crate::packet_plaintext;
 use crate::parser::ProtoMessage;
-use crate::proto::{self, DeviceInfoResponse, DisconnectResponse, HelloResponse, PingResponse};
+use crate::proto::{
+    self, AuthenticationResponse, DeviceInfoResponse, DisconnectResponse, HelloResponse,
+    PingResponse,
+};
 
 async fn write_error_and_disconnect(
     mut writer: FramedWrite<OwnedWriteHalf, FrameCodec>,
@@ -536,8 +539,20 @@ impl EspHomeApi {
                             .await
                             .unwrap();
                     }
-                    ProtoMessage::AuthenticationRequest(_) => {
-                        info!("Password Authentication is not supported");
+                    ProtoMessage::AuthenticationRequest(authentication_request) => {
+                        debug!("AuthenticationRequest: {:?}", authentication_request);
+
+                        if authentication_request.password != "" {
+                            info!("Password Authentication is not supported");
+                        } else {
+                            let response_message = AuthenticationResponse {
+                                invalid_password: false,
+                            };
+                            answer_messages_tx_clone
+                                .send(ProtoMessage::AuthenticationResponse(response_message))
+                                .await
+                                .unwrap();
+                        }
                     }
                     message => {
                         outgoing_messages_tx.send(message.clone()).unwrap();
