@@ -4,13 +4,15 @@ use log::debug;
 use noise_protocol::CipherState;
 use noise_rust_crypto::ChaCha20Poly1305;
 
+use alloc::string::String;
+use alloc::vec::Vec;
 use crate::parser;
 pub use parser::ProtoMessage;
 
 pub(crate) fn generate_server_hello_frame(name: String, mac: Option<String>) -> Vec<u8> {
     let mut message_server_hello: Vec<u8> = Vec::new();
 
-    let encryption_protocol: Vec<u8> = vec![1];
+    let encryption_protocol: Vec<u8> = alloc::vec![1];
     message_server_hello.extend(encryption_protocol);
     message_server_hello.extend(name.as_bytes());
     if let Some(mac) = mac.clone() {
@@ -25,23 +27,23 @@ pub(crate) fn generate_server_hello_frame(name: String, mac: Option<String>) -> 
 pub(crate) fn packet_to_message(
     buffer: &[u8],
     cipher_decrypt: &mut CipherState<ChaCha20Poly1305>,
-) -> Result<ProtoMessage, Box<dyn std::error::Error>> {
-    let decrypted_message_frame = cipher_decrypt.decrypt_vec(buffer).unwrap(); // "Error during decryption".to_string()
+) -> Result<ProtoMessage, &'static str> {
+    let decrypted_message_frame = cipher_decrypt.decrypt_vec(buffer).map_err(|_| "Decryption error")?;
 
     let message_type = BigEndian::read_u16(&decrypted_message_frame[0..2]) as usize;
     let packet_content = &decrypted_message_frame[4..];
     debug!("Message type: {}", message_type);
     debug!("Message: {:?}", packet_content);
 
-    Ok(parser::parse_proto_message(message_type, packet_content).unwrap())
+    parser::parse_proto_message(message_type, packet_content)
 }
 
 pub(crate) fn message_to_packet(
     message: &ProtoMessage,
     cipher_encrypt: &mut CipherState<ChaCha20Poly1305>,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+) -> Result<Vec<u8>, &'static str> {
     let response_content = parser::proto_to_vec(message)?;
-    let message_type = (parser::message_to_num(message).unwrap() as u16)
+    let message_type = (parser::message_to_num(message)? as u16)
         .to_be_bytes()
         .to_vec();
     let message_length = (response_content.len() as u16).to_be_bytes().to_vec();

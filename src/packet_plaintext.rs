@@ -1,21 +1,22 @@
 use log::debug;
 
+use alloc::vec::Vec;
 use crate::parser;
 pub use parser::ProtoMessage;
 
-pub(crate) fn packet_to_message(buffer: &[u8]) -> Result<ProtoMessage, Box<dyn std::error::Error>> {
+pub(crate) fn packet_to_message(buffer: &[u8]) -> Result<ProtoMessage, &'static str> {
     let message_type = buffer[0] as usize;
     let packet_content = &buffer[1..];
     debug!("Message type: {}", message_type);
     debug!("Message: {:02X?}", packet_content);
-    Ok(parser::parse_proto_message(message_type, packet_content).unwrap())
+    parser::parse_proto_message(message_type, packet_content)
 }
 
 
-pub(crate) fn message_to_packet(message: &ProtoMessage) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+pub(crate) fn message_to_packet(message: &ProtoMessage) -> Result<Vec<u8>, &'static str> {
     let response_content = parser::proto_to_vec(message)?;
     let message_type = parser::message_to_num(message)?;
-    let message_bit: Vec<u8> = vec![message_type];
+    let message_bit: Vec<u8> = alloc::vec![message_type];
 
     Ok([message_bit, response_content].concat())
 }

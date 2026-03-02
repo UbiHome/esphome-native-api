@@ -5,8 +5,14 @@ use log::trace;
 use prost::decode_length_delimiter;
 use prost::encode_length_delimiter;
 
+use alloc::vec;
+use alloc::vec::Vec;
+
+#[cfg(feature = "std")]
 use bytes::{Buf, BytesMut};
+#[cfg(feature = "std")]
 use tokio_util::codec::Decoder;
+#[cfg(feature = "std")]
 use tokio_util::codec::Encoder;
 
 pub(crate) struct FrameCodec {
@@ -23,6 +29,89 @@ impl FrameCodec {
     }
 }
 
+/// Encode a payload into a complete ESPHome wire frame.
+///
+/// `data` is `[msg_type_byte, payload...]` for plaintext, or the raw
+/// encrypted blob for encrypted frames.  Returns the full framed bytes
+/// ready to be written to the wire.
+pub fn encode_frame(data: &[u8], encrypted: bool) -> Result<Vec<u8>, &'static str> {
+    if data.is_empty() {
+        return Err("empty frame data");
+    }
+    let max = 8 * 1024 * 1024;
+    if data.len() > max {
+        return Err("Frame too large");
+    }
+    let mut out = Vec::new();
+    if encrypted {
+        let length = data.len() as u16;
+        out.push(1u8);
+        out.extend_from_slice(&length.to_be_bytes());
+    } else {
+        // Length = payload bytes excluding the leading message-type byte
+        let length = data.len() - 1;
+        out.push(0u8);
+        let mut len_buf = Vec::new();
+        encode_length_delimiter(length, &mut len_buf).map_err(|_| "varint encode error")?;
+        out.extend_from_slice(&len_buf);
+    }
+    out.extend_from_slice(data);
+    Ok(out)
+}
+
+/// Attempt to decode one frame from the front of `src`.
+///
+/// Returns `Some((payload, bytes_consumed))` if a complete frame is present,
+/// where `payload` is `[msg_type_byte, payload...]` for plaintext or the raw
+/// encrypted blob.  Returns `None` if more bytes are needed.
+pub fn decode_frame(src: &[u8], encrypted: bool) -> Result<Option<(Vec<u8>, usize)>, &'static str> {
+    if src.is_empty() {
+        return Ok(None);
+    }
+    if encrypted {
+        if src[0] != 1 {
+            return Err("Expected encrypted frame");
+        }
+        if src.len() < 3 {
+            return Ok(None);
+        }
+        let length = BigEndian::read_u16(&src[1..3]) as usize;
+        if src.len() < 3 + length {
+            return Ok(None);
+        }
+        let payload = src[3..3 + length].to_vec();
+        Ok(Some((payload, 3 + length)))
+    } else {
+        if src[0] != 0 {
+            return Err("Expected plaintext frame");
+        }
+        // Decode varint length starting at src[1]
+        let mut varint_len = 1usize;
+        loop {
+            if src.len() < varint_len + 1 {
+                return Ok(None);
+            }
+            if src[varint_len] & 0x80 == 0 {
+                break;
+            }
+            varint_len += 1;
+            if varint_len > 4 {
+                return Err("Varint too long");
+            }
+        }
+        let length = decode_length_delimiter(&src[1..varint_len + 1])
+            .map_err(|_| "varint decode error")? as usize
+            + 1; // +1 for the message-type byte
+        let total = 1 + varint_len + length;
+        if src.len() < total {
+            return Ok(None);
+        }
+        let payload = src[1 + varint_len..total].to_vec();
+        Ok(Some((payload, total)))
+    }
+}
+
+#[cfg(feature = "std")]
 impl Decoder for FrameCodec {
     type Item = Vec<u8>;
     type Error = std::io::Error;
@@ -113,6 +202,7 @@ impl Decoder for FrameCodec {
     }
 }
 
+#[cfg(feature = "std")]
 impl Encoder<Vec<u8>> for FrameCodec {
     type Error = std::io::Error;
 
@@ -160,6 +250,7 @@ impl Encoder<Vec<u8>> for FrameCodec {
     }
 }
 
+#[cfg(feature = "std")]
 #[cfg(test)]
 mod tests {
     use futures::sink::SinkExt;
