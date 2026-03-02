@@ -1,0 +1,24 @@
+[package]
+name = "embassy-esphome"
+version = "0.1.0"
+edition = "2021"
+description = "Embassy-rs example demonstrating no_std usage of esphome-native-api"
+
+[[bin]]
+name = "embassy-esphome"
+path = "src/main.rs"
+
+[dependencies]
+# Embassy async executor — arch-std runs on desktop for easy development.
+# For real embedded hardware swap arch-std for arch-cortex-m (or your target arch)
+# and add the matching embassy-rp / embassy-stm32 / embassy-nrf HAL crate.
+embassy-executor = { version = "0.7", features = ["arch-std", "executor-thread"] }
+
+# The esphome-native-api crate — compiled without std so only the proto types
+# are available.  This is the point of the example: the proto module must work
+# in a no_std environment.
+esphome-native-api = { path = "../..", default-features = false, features = ["version_2026_1_5"] }
+
+# prost is needed to call Message::encode_to_vec / Message::decode on the
+# generated proto types.
+prost = "0.13"
