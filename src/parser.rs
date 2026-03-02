@@ -2,6 +2,9 @@
 
 // TODO: Parser should part of the proto generator
 
+use alloc::boxed::Box;
+use alloc::string::String;
+use alloc::vec::Vec;
 use prost::Message;
 
 use crate::proto::{
@@ -63,7 +66,7 @@ macro_rules! proto_message_mappings {
                         .map(ProtoMessage::$struct)
                         .map_err(|_| concat!("Failed to decode ", stringify!($struct))),
                 )*
-                _ => Err(Box::leak(format!("Unknown message type: {}", message_type).into_boxed_str())),
+                _ => Err(Box::leak(alloc::format!("Unknown message type: {}", message_type).into_boxed_str())),
             }
         }
 

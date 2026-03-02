@@ -21,18 +21,21 @@ include = [
 
 [dependencies]
 log = "0.4"
-tokio = { version = "1", features = ["full"] }
-prost = "0.13.5"
+prost = { version = "0.13.5", default-features = false, features = ["prost-derive"] }
 typed-builder = "0.21.0"
 constant_time_eq = "0.4.2"
-base64 = "0.22.1"
+base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 noise-rust-crypto = "0.6.2"
-noise-protocol = "0.2.0"
-byteorder = "1.5.0"
-tokio-util = { version = "0.7.17", features = ["codec"]  }
-tokio-stream = "0.1.17"
-bytes = "1.11.0"
-futures = "0.3.31"
+noise-protocol = { version = "0.2.0", default-features = false, features = ["use_alloc"] }
+byteorder = { version = "1.5.0", default-features = false }
+bytes = { version = "1.11.0", default-features = false }
+embedded-io-async = "0.6"
+
+# std-only deps
+tokio = { version = "1", features = ["full"], optional = true }
+tokio-util = { version = "0.7.17", features = ["codec"], optional = true }
+tokio-stream = { version = "0.1.17", optional = true }
+futures = { version = "0.3.31", optional = true }
 
 [workspace]
 resolver = "2"
@@ -44,7 +47,7 @@ test-log = { version = "0.2.16", features = ["log", "color"] }
 
 [features]
 default = ["std", "version_2026_1_5"]
-std = []
+std = ["dep:tokio", "dep:tokio-util", "dep:tokio-stream", "dep:futures"]
 version_2025_12_6 = []
 version_2025_12_5 = []
 version_2025_12_4 = []

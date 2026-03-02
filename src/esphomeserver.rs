@@ -40,15 +40,21 @@ use noise_protocol::HandshakeState;
 use noise_rust_crypto::ChaCha20Poly1305;
 use noise_rust_crypto::Sha256;
 use noise_rust_crypto::X25519;
-use std::collections::HashMap;
-use std::str;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use tokio::net::TcpStream;
-use tokio::sync::Mutex;
-use tokio::sync::broadcast;
-use tokio::sync::mpsc;
+use alloc::borrow::ToOwned;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::sync::Arc;
+use core::sync::atomic::AtomicBool;
 use typed_builder::TypedBuilder;
+
+#[cfg(feature = "std")]
+use {
+    tokio::net::TcpStream,
+    tokio::sync::Mutex,
+    tokio::sync::broadcast,
+    tokio::sync::mpsc,
+};
 
 use crate::esphomeapi::EspHomeApi;
 use crate::parser::ProtoMessage;
@@ -78,10 +84,10 @@ use crate::proto::ListEntitiesDoneResponse;
 #[derive(TypedBuilder)]
 pub struct EspHomeServer {
     // Private fields
-    #[builder(default=HashMap::new(), setter(skip))]
-    pub(crate) components_by_key: HashMap<u32, Entity>,
-    #[builder(default=HashMap::new(), setter(skip))]
-    pub(crate) components_key_id: HashMap<String, u32>,
+    #[builder(default=BTreeMap::new(), setter(skip))]
+    pub(crate) components_by_key: BTreeMap<u32, Entity>,
+    #[builder(default=BTreeMap::new(), setter(skip))]
+    pub(crate) components_key_id: BTreeMap<String, u32>,
     #[builder(default = 0, setter(skip))]
     pub(crate) current_key: u32,
 
@@ -89,15 +95,30 @@ pub struct EspHomeServer {
     pub(crate) encrypted_api: Arc<AtomicBool>,
 
     #[builder(via_mutators)]
-    pub(crate) noise_psk: Vec<u8>,
+    pub(crate) noise_psk: alloc::vec::Vec<u8>,
 
+    // std-only: shared tokio Mutex for concurrent task access
+    #[cfg(feature = "std")]
     #[builder(default=Arc::new(Mutex::new(None)), setter(skip))]
     pub(crate) handshake_state:
         Arc<Mutex<Option<HandshakeState<X25519, ChaCha20Poly1305, Sha256>>>>,
+    #[cfg(feature = "std")]
     #[builder(default=Arc::new(Mutex::new(None)), setter(skip))]
     pub(crate) encrypt_cypher: Arc<Mutex<Option<CipherState<ChaCha20Poly1305>>>>,
+    #[cfg(feature = "std")]
     #[builder(default=Arc::new(Mutex::new(None)), setter(skip))]
     pub(crate) decrypt_cypher: Arc<Mutex<Option<CipherState<ChaCha20Poly1305>>>>,
+
+    // no_std: plain state (single-task model)
+    #[cfg(not(feature = "std"))]
+    #[builder(default = None, setter(skip))]
+    pub(crate) handshake_state: Option<HandshakeState<X25519, ChaCha20Poly1305, Sha256>>,
+    #[cfg(not(feature = "std"))]
+    #[builder(default = None, setter(skip))]
+    pub(crate) encrypt_cypher: Option<CipherState<ChaCha20Poly1305>>,
+    #[cfg(not(feature = "std"))]
+    #[builder(default = None, setter(skip))]
+    pub(crate) decrypt_cypher: Option<CipherState<ChaCha20Poly1305>>,
 
     name: String,
 
@@ -134,6 +155,48 @@ pub struct EspHomeServer {
 /// Easier version of the API abstraction.
 ///
 /// Manages entity keys internally.
+impl EspHomeServer {
+    /// Adds an entity to the server's internal registry.
+    ///
+    /// Each entity is assigned a unique key that is managed internally. The entity
+    /// can be referenced by its string identifier in subsequent operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `entity_id` - A unique string identifier for the entity
+    /// * `entity` - The entity to register
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use esphome_native_api::esphomeserver::{EspHomeServer, Entity, BinarySensor};
+    /// let mut server = EspHomeServer::builder().name("server".to_string()).build();
+    /// let sensor = Entity::BinarySensor(BinarySensor {
+    ///     object_id: "motion_sensor".to_string(),
+    /// });
+    /// server.add_entity("motion", sensor);
+    /// ```
+    pub fn add_entity(&mut self, entity_id: &str, entity: Entity) {
+        self.components_key_id
+            .insert(entity_id.to_string(), self.current_key);
+        self.components_by_key.insert(self.current_key, entity);
+
+        self.current_key += 1;
+    }
+
+    /// Build an [`EspHomeApi`] pre-configured with this server's settings.
+    pub fn build_api(&self) -> EspHomeApi {
+        EspHomeApi::builder()
+            .api_version_major(self.api_version_major)
+            .api_version_minor(self.api_version_minor)
+            .server_info(self.server_info.clone())
+            .name(self.name.clone())
+            .build()
+    }
+}
+
+/// `std`-only methods: tokio-based channel/spawn API.
+#[cfg(feature = "std")]
 impl EspHomeServer {
     /// Starts the ESPHome server and begins communication over the provided TCP stream.
     ///
@@ -178,33 +241,18 @@ impl EspHomeServer {
         ),
         Box<dyn std::error::Error>,
     > {
-        let mut server = EspHomeApi::builder()
-            .api_version_major(self.api_version_major)
-            .api_version_minor(self.api_version_minor)
-            // .password(self.password.or_else())
-            .server_info(self.server_info.clone())
-            .name(self.name.clone())
-            // .friendly_name(self.friendly_name)
-            // .bluetooth_mac_address(self.bluetooth_mac_address)
-            // .mac(self.mac)
-            // .manufacturer(self.manufacturer)
-            // .model(self.model)
-            // .suggested_area(self.suggested_area)
-            .build();
+        let mut server = self.build_api();
         let (messages_tx, mut messages_rx) = server.start(tcp_stream).await?;
         let (outgoing_messages_tx, outgoing_messages_rx) = broadcast::channel::<ProtoMessage>(16);
         let api_components_clone = self.components_by_key.clone();
-        // let messages_tx_clone = messages_tx.clone();
 
         tokio::spawn(async move {
             loop {
                 messages_rx.recv().await.map_or_else(
                     |e| {
                         error!("Error receiving message: {:?}", e);
-                        // Handle the error, maybe log it or break the loop
                     },
                     |message| {
-                        // Process the received message
                         debug!("Received message: {:?}", message);
 
                         match message {
@@ -222,7 +270,6 @@ impl EspHomeServer {
                                     .unwrap();
                             }
                             other_message => {
-                                // Forward the message to the outgoing channel
                                 if let Err(e) = outgoing_messages_tx.send(other_message) {
                                     error!("Error sending message to outgoing channel: {:?}", e);
                                 }
@@ -234,34 +281,6 @@ impl EspHomeServer {
         });
 
         Ok((messages_tx.clone(), outgoing_messages_rx))
-    }
-
-    /// Adds an entity to the server's internal registry.
-    ///
-    /// Each entity is assigned a unique key that is managed internally. The entity
-    /// can be referenced by its string identifier in subsequent operations.
-    ///
-    /// # Arguments
-    ///
-    /// * `entity_id` - A unique string identifier for the entity
-    /// * `entity` - The entity to register
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use esphome_native_api::esphomeserver::{EspHomeServer, Entity, BinarySensor};
-    /// let mut server = EspHomeServer::builder().name("server".to_string()).build();
-    /// let sensor = Entity::BinarySensor(BinarySensor {
-    ///     object_id: "motion_sensor".to_string(),
-    /// });
-    /// server.add_entity("motion", sensor);
-    /// ```
-    pub fn add_entity(&mut self, entity_id: &str, entity: Entity) {
-        self.components_key_id
-            .insert(entity_id.to_string(), self.current_key);
-        self.components_by_key.insert(self.current_key, entity);
-
-        self.current_key += 1;
     }
 }
 

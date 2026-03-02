@@ -3,6 +3,8 @@
 //! This module implements a 32-bit FNV-1 hash function with specific preprocessing
 //! steps just like the ESPHome native API uses for generating entity keys from object IDs.
 
+use alloc::string::{String, ToString};
+
 const FNV1_OFFSET_BASIS: u32 = 2166136261;
 const FNV1_PRIME: u32 = 16777619;
 
