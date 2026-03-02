@@ -36,14 +36,14 @@ futures = "0.3.31"
 
 [workspace]
 resolver = "2"
-members = ["generator"]
+members = ["generator", "examples/embassy"]
 
 [dev-dependencies]
 pretty_env_logger = "0.5.0"
 test-log = { version = "0.2.16", features = ["log", "color"] }
 
 [features]
-default = ["std", "version_2025_12_6"]
+default = ["std", "version_2026_1_5"]
 std = []
 version_2025_12_6 = []
 version_2025_12_5 = []
@@ -95,3 +95,10 @@ version_2025_3_1 = []
 version_2025_3_0 = []
 version_2025_2_2 = []
 version_2025_2_1 = []
+version_2025_12_7 = []
+version_2026_1_0 = []
+version_2026_1_1 = []
+version_2026_1_2 = []
+version_2026_1_3 = []
+version_2026_1_4 = []
+version_2026_1_5 = []
