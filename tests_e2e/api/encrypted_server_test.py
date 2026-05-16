@@ -136,6 +136,30 @@ async def test_do_not_allow_password_authentication(
         await api.connect(login=True)
 
 
+async def test_protocol_update(
+    encrypted_server: EspHomeTestServer,
+):
+    """An encrypted server should allow connections to update from plaintext to encrypted"""
+    api = aioesphomeapi.APIClient("127.0.0.1", encrypted_server.port, None)
+
+    # First try connect with plaintext
+    with pytest.raises(aioesphomeapi.core.RequiresEncryptionAPIError):
+        await api.connect(login=False)
+
+    # The following connection should succeed with the correct encryption key
+    api = aioesphomeapi.APIClient(
+        "127.0.0.1",
+        encrypted_server.port,
+        None,
+        noise_psk=encrypted_server.noise_psk,
+    )
+    await api.connect(login=True)
+    # Test API Hello
+    assert api.api_version.major == 1
+    assert api.api_version.minor == 42
+    assert api.log_name == "test_device @ 127.0.0.1"
+
+
 async def test_do_not_allow_wrong_key(encrypted_server: EspHomeTestServer):
     api = aioesphomeapi.APIClient(
         "127.0.0.1",

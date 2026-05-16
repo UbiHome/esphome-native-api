@@ -35,8 +35,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     debug!("Listening on: {}", addr);
 
+    let mut server = EspHomeApi::builder()
+        .api_version_major(1)
+        .api_version_minor(42)
+        // .password("password".to_string())
+        .server_info("test_server_info".to_string())
+        .name("test_device".to_string())
+        .friendly_name("friendly_test_device".to_string())
+        .bluetooth_mac_address("B0:00:00:00:00:00".to_string())
+        .mac("00:00:00:00:00:01".to_string())
+        .manufacturer("Test Inc.".to_string())
+        .model("Test Model".to_string())
+        .suggested_area("Test Area".to_string())
+        .encryption_key("px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA=".to_string())
+        .build();
+
     let main_server = async {
         loop {
+            let mut server = server.clone();
             let (stream, _) = listener
                 .accept()
                 .await
@@ -45,21 +61,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Spawn a tokio task to serve multiple connections concurrently
             tokio::task::spawn(async move {
-                let mut server = EspHomeApi::builder()
-                    .api_version_major(1)
-                    .api_version_minor(42)
-                    // .password("password".to_string())
-                    .server_info("test_server_info".to_string())
-                    .name("test_device".to_string())
-                    .friendly_name("friendly_test_device".to_string())
-                    .bluetooth_mac_address("B0:00:00:00:00:00".to_string())
-                    .mac("00:00:00:00:00:01".to_string())
-                    .manufacturer("Test Inc.".to_string())
-                    .model("Test Model".to_string())
-                    .suggested_area("Test Area".to_string())
-                    .encryption_key("px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA=".to_string())
-                    .build();
-
                 let entities = vec![
                     // All supported entities in alphabetical order
                     ProtoMessage::ListEntitiesBinarySensorResponse(

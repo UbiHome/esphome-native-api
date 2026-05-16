@@ -178,7 +178,7 @@ impl EspHomeServer {
         ),
         Box<dyn std::error::Error>,
     > {
-        let mut server = EspHomeApi::builder()
+        let server = EspHomeApi::builder()
             .api_version_major(self.api_version_major)
             .api_version_minor(self.api_version_minor)
             // .password(self.password.or_else())

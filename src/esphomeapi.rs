@@ -59,7 +59,6 @@ use noise_rust_crypto::ChaCha20Poly1305;
 use noise_rust_crypto::Sha256;
 use noise_rust_crypto::X25519;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
@@ -134,17 +133,6 @@ const ERROR_HANDSHAKE_MAC_FAILURE: &str = "Handshake MAC failure";
 #[derive(TypedBuilder, Clone)]
 pub struct EspHomeApi {
     // Private fields
-    #[builder(default=Arc::new(AtomicBool::new(false)))]
-    pub(crate) first_message_received: Arc<AtomicBool>,
-
-    #[builder(default=Arc::new(AtomicBool::new(true)))]
-    pub(crate) plaintext_communication: Arc<AtomicBool>,
-
-    #[builder(default=Arc::new(Mutex::new(None)), setter(skip))]
-    pub(crate) encrypt_cypher: Arc<Mutex<Option<CipherState<ChaCha20Poly1305>>>>,
-    #[builder(default=Arc::new(Mutex::new(None)), setter(skip))]
-    pub(crate) decrypt_cypher: Arc<Mutex<Option<CipherState<ChaCha20Poly1305>>>>,
-
     name: String,
 
     #[builder(default = None, setter(strip_option(fallback=encryption_key_opt)))]
@@ -232,7 +220,7 @@ impl EspHomeApi {
     /// # }
     /// ```
     pub async fn start<S>(
-        &mut self,
+        &self,
         stream: S,
     ) -> Result<
         (
@@ -284,8 +272,12 @@ impl EspHomeApi {
             name: self.name.clone(),
         };
 
-        let encrypt_cypher_clone = self.encrypt_cypher.clone();
-        let decrypt_cypher_clone = self.decrypt_cypher.clone();
+        // Per-connection cipher state — created fresh so multiple concurrent connections
+        // never share encryption context.
+        let encrypt_cypher: Arc<Mutex<Option<CipherState<ChaCha20Poly1305>>>> =
+            Arc::new(Mutex::new(None));
+        let decrypt_cypher: Arc<Mutex<Option<CipherState<ChaCha20Poly1305>>>> =
+            Arc::new(Mutex::new(None));
 
         // Stage 1: Initialization
         trace!("Init Connection: Stage 1");
@@ -303,35 +295,19 @@ impl EspHomeApi {
 
         let preamble = peeked_bytes[0] as usize;
 
-        let first_message_received = self
-            .first_message_received
-            .load(std::sync::atomic::Ordering::Relaxed);
-
-        if !first_message_received {
-            match preamble {
-                0 => {
-                    debug!("Cleartext messaging");
-
-                    self.plaintext_communication
-                        .store(true, std::sync::atomic::Ordering::Relaxed);
-                }
-                1 => {
-                    trace!("Encrypted messaging");
-
-                    self.plaintext_communication
-                        .store(false, std::sync::atomic::Ordering::Relaxed);
-                }
-                _ => {
-                    return Err(format!("Invalid marker byte {}", preamble).into());
-                }
+        let plaintext_communication = match preamble {
+            0 => {
+                debug!("Cleartext messaging");
+                true
             }
-            self.first_message_received
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-
-        let plaintext_communication = self
-            .plaintext_communication
-            .load(std::sync::atomic::Ordering::Relaxed);
+            1 => {
+                trace!("Encrypted messaging");
+                false
+            }
+            _ => {
+                return Err(format!("Invalid marker byte {}", preamble).into());
+            }
+        };
         let encrypted = !plaintext_communication;
 
         let decoder = FrameCodec::new(encrypted);
@@ -398,8 +374,8 @@ impl EspHomeApi {
 
             let out = handshake_state.write_message_vec(b"").unwrap();
             {
-                let mut encrypt_cipher_changer = encrypt_cypher_clone.lock().await;
-                let mut decrypt_cipher_changer = decrypt_cypher_clone.lock().await;
+                let mut encrypt_cipher_changer = encrypt_cypher.lock().await;
+                let mut decrypt_cipher_changer = decrypt_cypher.lock().await;
                 let (decrypt_cipher, encrypt_cipher) = handshake_state.get_ciphers();
                 *encrypt_cipher_changer = Some(encrypt_cipher);
                 *decrypt_cipher_changer = Some(decrypt_cipher);
@@ -419,7 +395,7 @@ impl EspHomeApi {
         let (cancellation_write_tx, mut cancellation_write_rx) = oneshot::channel();
 
         // Write Loop
-        let plaintext_communication = self.plaintext_communication.clone();
+        let encrypt_cypher_for_write = encrypt_cypher;
         tokio::spawn(async move {
             loop {
                 let answer_message: ProtoMessage;
@@ -438,7 +414,7 @@ impl EspHomeApi {
 
                 debug!("Answer message: {:?}", answer_message);
 
-                if plaintext_communication.load(std::sync::atomic::Ordering::Relaxed) {
+                if plaintext_communication {
                     writer
                         .send(packet_plaintext::message_to_packet(&answer_message).unwrap())
                         .await
@@ -447,7 +423,7 @@ impl EspHomeApi {
                     //     [answer_buf, to_unencrypted_frame(&answer_message).unwrap()].concat();
                 } else {
                     // Use normal messaging
-                    let mut encrypt_cipher_changer = encrypt_cypher_clone.lock().await;
+                    let mut encrypt_cipher_changer = encrypt_cypher_for_write.lock().await;
                     writer
                         .send(
                             packet_encrypted::message_to_packet(
@@ -477,7 +453,6 @@ impl EspHomeApi {
 
         // Clone all necessary data before spawning the task
         let answer_messages_tx_clone = answer_messages_tx.clone();
-        let decrypt_cypher_clone = self.decrypt_cypher.clone();
         // Read Loop
         tokio::spawn(async move {
             loop {
@@ -493,7 +468,7 @@ impl EspHomeApi {
 
                 let message;
                 if encrypted {
-                    let mut decrypt_cipher_changer = decrypt_cypher_clone.lock().await;
+                    let mut decrypt_cipher_changer = decrypt_cypher.lock().await;
                     message = packet_encrypted::packet_to_message(
                         &frame,
                         &mut *decrypt_cipher_changer.as_mut().unwrap(),
