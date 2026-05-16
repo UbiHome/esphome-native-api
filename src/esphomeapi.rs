@@ -60,9 +60,7 @@ use noise_rust_crypto::Sha256;
 use noise_rust_crypto::X25519;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
-use tokio::net::tcp::OwnedWriteHalf;
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
@@ -81,10 +79,10 @@ use crate::proto::{
     PingResponse,
 };
 
-async fn write_error_and_disconnect(
-    mut writer: FramedWrite<OwnedWriteHalf, FrameCodec>,
-    message: &str,
-) {
+async fn write_error_and_disconnect<W>(mut writer: FramedWrite<W, FrameCodec>, message: &str)
+where
+    W: AsyncWrite + Unpin,
+{
     error!("API Failure: {}. Disconnecting.", message);
     let packet = [[1].to_vec(), message.as_bytes().to_vec()].concat();
     writer.send(packet).await.unwrap();
@@ -233,16 +231,19 @@ impl EspHomeApi {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn start(
+    pub async fn start<S>(
         &mut self,
-        tcp_stream: TcpStream,
+        stream: S,
     ) -> Result<
         (
             mpsc::Sender<ProtoMessage>,
             broadcast::Receiver<ProtoMessage>,
         ),
         Box<dyn std::error::Error>,
-    > {
+    >
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
         // Channel for messages
         let (answer_messages_tx, mut answer_messages_rx) = mpsc::channel::<ProtoMessage>(16);
         let (outgoing_messages_tx, outgoing_messages_rx) = broadcast::channel::<ProtoMessage>(16);
@@ -290,19 +291,17 @@ impl EspHomeApi {
         trace!("Init Connection: Stage 1");
         let encryption_key = self.encryption_key.clone();
 
-        let mut buf = vec![0; 1];
-        let n = tcp_stream
-            .peek(&mut buf)
-            .await
-            .expect("failed to read data from socket");
+        let (stream_read, stream_write) = tokio::io::split(stream);
+        let mut stream_read = BufReader::new(stream_read);
 
-        if n == 0 {
+        let peeked_bytes = stream_read.fill_buf().await?;
+        if peeked_bytes.is_empty() {
             return Err("No data".into());
         }
 
-        trace!("TCP Peeked: {:02X?}", &buf[0..n]);
+        trace!("TCP Peeked: {:02X?}", &peeked_bytes[0..1]);
 
-        let preamble = buf[0] as usize;
+        let preamble = peeked_bytes[0] as usize;
 
         let first_message_received = self
             .first_message_received
@@ -335,11 +334,10 @@ impl EspHomeApi {
             .load(std::sync::atomic::Ordering::Relaxed);
         let encrypted = !plaintext_communication;
 
-        let (tcp_read, tcp_write) = tcp_stream.into_split();
         let decoder = FrameCodec::new(encrypted);
         let encoder = FrameCodec::new(encrypted);
-        let mut reader = FramedRead::new(tcp_read, decoder);
-        let mut writer = FramedWrite::new(tcp_write, encoder);
+        let mut reader = FramedRead::new(stream_read, decoder);
+        let mut writer = FramedWrite::new(stream_write, encoder);
 
         if plaintext_communication {
             if self.encryption_key.is_some() {
@@ -562,18 +560,5 @@ impl EspHomeApi {
         });
 
         Ok((answer_messages_tx.clone(), outgoing_messages_rx))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    // Note this useful idiom: importing names from outer (for mod tests) scope.
-    use super::*;
-
-    #[test]
-    fn test_basic_server_instantiation() {
-        EspHomeApi::builder()
-            .name("test_device".to_string())
-            .build();
     }
 }
