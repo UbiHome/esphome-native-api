@@ -2,7 +2,7 @@ name: Scheduled Test
 
 on:
   schedule:
-    - cron: "0 0 * * 1"
+    - cron: '0 0 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -66,11 +66,11 @@ jobs:
         with:
           enable-cache: true
           # Install a specific version of uv.
-          version: "0.8.4"
+          version: '0.8.4'
 
-      - name: Run tests
+      - name: Run E2E tests
         run: |-
           cargo build --examples
-          cd tests
+          cd tests-e2e
           uv add aioesphomeapi>30
           uv run pytest

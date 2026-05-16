@@ -109,7 +109,7 @@ jobs:
         with:
           command: build
           target: ${{ matrix.platform.target }}
-          args: "--release --locked"
+          args: '--release --locked'
           strip: false
 
       - name: Test binary
@@ -117,7 +117,7 @@ jobs:
         with:
           command: test
           target: ${{ matrix.platform.target }}
-          args: "--verbose --locked"
+          args: '--verbose --locked'
           strip: false
 
   e2e-test:
@@ -151,15 +151,15 @@ jobs:
 
       - uses: actions/cache@v4
         with:
-          path: tests/.tox
+          path: tests-e2e/.tox
           key: ${{ runner.os }}-tox-${{ hashFiles('**/tox.ini') }}
           restore-keys: |
             ${{ runner.os }}-tox
 
-      - name: Run tests
+      - name: Run E2E tests
         run: |-
           cargo build --examples
-          cd tests
+          cd tests-e2e
           uv run pytest
           uv tool install tox --with tox-uv
           tox
@@ -200,7 +200,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-
       - name: Download proto source files
         uses: actions/download-artifact@v4
         with:
@@ -214,17 +213,16 @@ jobs:
       - name: Generate Doc
         uses: houseabsolute/actions-rust-cross@v1
         env:
-          RUSTFLAGS: "-D warnings"
-          RUSTDOCFLAGS: "-D warnings"
+          RUSTFLAGS: '-D warnings'
+          RUSTDOCFLAGS: '-D warnings'
         with:
           command: doc -p esphome-native-api
           target: x86_64-unknown-linux-musl
 
-      
       - name: Text Doc Examples
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: test --doc
           target: x86_64-unknown-linux-musl
-          args: "--verbose --locked"
+          args: '--verbose --locked'
           strip: false

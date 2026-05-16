@@ -22,10 +22,10 @@ test:
 	cargo test --doc
 
 e2e-test:
-	cd tests
+	cd tests-e2e
 	uv run pytest
 
 e2e-matrix:
 	cargo build --examples
-	cd tests
+	cd tests-e2e
 	tox
