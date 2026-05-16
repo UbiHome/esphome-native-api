@@ -1,10 +1,10 @@
 {
     "python.testing.pytestArgs": [
-        "tests-e2e"
+        "tests_e2e"
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
-    "python.defaultInterpreterPath": "${workspaceFolder}/tests-e2e/.venv/Scripts/python.exe",
+    "python.defaultInterpreterPath": "${workspaceFolder}/tests_e2e/.venv/Scripts/python.exe",
     "debugpy.debugJustMyCode": false,
     "rust-analyzer.runnables.extraEnv": {
         "RUST_BACKTRACE": "1",

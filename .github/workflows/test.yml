@@ -71,6 +71,6 @@ jobs:
       - name: Run E2E tests
         run: |-
           cargo build --examples
-          cd tests-e2e
+          cd tests_e2e
           uv add aioesphomeapi>30
           uv run pytest

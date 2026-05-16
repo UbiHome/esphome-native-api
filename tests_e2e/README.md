@@ -10,7 +10,7 @@ uv sync
 ## Development
 
 ```bash
-cd tests-e2e
+cd tests_e2e
 uv run pytest
 ```
 

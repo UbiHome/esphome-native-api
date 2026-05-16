@@ -151,7 +151,7 @@ jobs:
 
       - uses: actions/cache@v4
         with:
-          path: tests-e2e/.tox
+          path: tests_e2e/.tox
           key: ${{ runner.os }}-tox-${{ hashFiles('**/tox.ini') }}
           restore-keys: |
             ${{ runner.os }}-tox
@@ -159,7 +159,7 @@ jobs:
       - name: Run E2E tests
         run: |-
           cargo build --examples
-          cd tests-e2e
+          cd tests_e2e
           uv run pytest
           uv tool install tox --with tox-uv
           tox

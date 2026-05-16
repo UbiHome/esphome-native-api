@@ -6,7 +6,7 @@ from aioesphomeapi.reconnect_logic import ReconnectLogic, ReconnectLogicState
 
 import pytest
 
-from tests.conftest import EspHomeTestServer
+from tests_e2e.conftest import EspHomeTestServer
 
 
 async def test_encrypted_server(encrypted_server: EspHomeTestServer):

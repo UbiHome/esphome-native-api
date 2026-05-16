@@ -19,7 +19,7 @@ cargo run --example server
 1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
 ```
-cd tests-e2e
+cd tests_e2e
 uv run pytest
 ```
 

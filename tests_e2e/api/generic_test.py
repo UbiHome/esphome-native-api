@@ -2,7 +2,7 @@ from asyncio import sleep
 from unittest.mock import Mock
 import aioesphomeapi
 
-from tests.conftest import EspHomeTestServer
+from tests_e2e.conftest import EspHomeTestServer
 
 
 async def test_run(test_server: EspHomeTestServer):
