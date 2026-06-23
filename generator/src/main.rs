@@ -5,7 +5,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{Seek, Write};
 use std::path::Path;
 
-const CURRENT_VERSION: &str = "2025.12.1";
+const CURRENT_VERSION: &str = "2026.6.2";
 const LAST_SUPPLIED_VERSION: &str = "2025.2.1";
 
 fn get_package_name(version: &str) -> String {
@@ -30,7 +30,8 @@ async fn main() {
     #![allow(missing_docs)]\n\n\
     //! Home of all automatically generated proto modules.\n\
     //! Contains the versioned modules that are activated by default or via the feature flags.\n\n\
-    ".to_string();
+    "
+    .to_string();
     let mut versions: Vec<String> = Vec::new();
 
     let repo = octocrab.repos("esphome", "esphome");

@@ -263,6 +263,7 @@ impl EspHomeApi {
             area: None,
             zwave_proxy_feature_flags: 0,
             zwave_home_id: 0,
+            serial_proxies: vec![],
         };
 
         let hello_response = HelloResponse {
