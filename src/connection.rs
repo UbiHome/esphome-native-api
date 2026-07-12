@@ -74,11 +74,11 @@ impl Connection {
     ///
     /// Returns `Ok(())` for a clean shutdown, `Err(Error::Disconnected(_))` when
     /// the peer went away (the normal case), or another [`Error`] for a genuine
-    /// fault. Consuming `self` here is deliberate: obtain a [`Connection::sender`]
+    /// fault — including [`Error::TaskFailed`] if the connection's background
+    /// task died (for example, panicked) without reporting an outcome.
+    /// Consuming `self` here is deliberate: obtain a [`Connection::sender`]
     /// and [`Connection::receiver`] first if you need them for the session.
     pub async fn wait(self) -> Result<(), Error> {
-        // If the read-loop task was dropped without reporting (should not happen
-        // in normal operation), treat it as a clean shutdown.
-        self.done.await.unwrap_or(Ok(()))
+        self.done.await.unwrap_or(Err(Error::TaskFailed))
     }
 }

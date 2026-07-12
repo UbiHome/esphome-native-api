@@ -37,6 +37,7 @@
 #![allow(dead_code)]
 
 use log::debug;
+use log::warn;
 use noise_protocol::CipherState;
 use noise_protocol::HandshakeState;
 use noise_rust_crypto::ChaCha20Poly1305;
@@ -49,6 +50,7 @@ use std::sync::atomic::AtomicBool;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
+use tokio::sync::broadcast::error::RecvError;
 use typed_builder::TypedBuilder;
 
 use crate::connection::Connection;
@@ -200,10 +202,13 @@ impl EspHomeServer {
             loop {
                 let message = match messages_rx.recv().await {
                     Ok(message) => message,
-                    Err(_) => {
-                        // The underlying connection closed; stop routing.
-                        break;
+                    // Lagging only skips messages; the connection is still alive.
+                    Err(RecvError::Lagged(skipped)) => {
+                        warn!("Message routing lagged, {skipped} messages skipped");
+                        continue;
                     }
+                    // The underlying connection closed; stop routing.
+                    Err(RecvError::Closed) => break,
                 };
                 debug!("Received message: {:?}", message);
 

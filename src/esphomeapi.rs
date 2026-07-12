@@ -130,9 +130,10 @@ fn is_peer_gone(err: &std::io::Error) -> bool {
     )
 }
 
-/// Map a writer-side I/O error during the handshake into a typed [`Error`].
-fn handshake_write_err(err: std::io::Error) -> Error {
-    if is_peer_gone(&err) {
+/// Map an I/O error during the handshake into a typed [`Error`], treating a
+/// peer that went away as [`HandshakeError::Aborted`].
+fn handshake_io_err(err: std::io::Error) -> Error {
+    if is_peer_gone(&err) || err.kind() == std::io::ErrorKind::UnexpectedEof {
         Error::Handshake(HandshakeError::Aborted)
     } else {
         Error::Io(err)
@@ -147,8 +148,11 @@ where
 {
     match reader.next().await {
         Some(Ok(frame)) => Ok(frame),
-        Some(Err(e)) => Err(classify_read_error(e)),
-        None => Err(Error::Handshake(HandshakeError::Aborted)),
+        Some(Err(e)) => Err(match classify_read_error(e) {
+            Error::Disconnected(_) => HandshakeError::Aborted.into(),
+            other => other,
+        }),
+        None => Err(HandshakeError::Aborted.into()),
     }
 }
 
@@ -364,7 +368,7 @@ impl EspHomeApi {
         let (stream_read, stream_write) = tokio::io::split(stream);
         let mut stream_read = BufReader::new(stream_read);
 
-        let peeked_bytes = stream_read.fill_buf().await?;
+        let peeked_bytes = stream_read.fill_buf().await.map_err(handshake_io_err)?;
         if peeked_bytes.is_empty() {
             return Err(HandshakeError::NoData.into());
         }
@@ -423,8 +427,8 @@ impl EspHomeApi {
             writer
                 .send(message_server_hello.clone())
                 .await
-                .map_err(handshake_write_err)?;
-            writer.flush().await.map_err(handshake_write_err)?;
+                .map_err(handshake_io_err)?;
+            writer.flush().await.map_err(handshake_io_err)?;
 
             let frame_handshake_request = read_handshake_frame(&mut reader).await?;
             debug!("Frame 2: {:02X?}", &frame_handshake_request);
@@ -455,9 +459,11 @@ impl EspHomeApi {
                 Ok(_) => {}
                 Err(e) => match e.kind() {
                     ErrorKind::Decryption => {
-                        let err = HandshakeError::MacFailure;
-                        write_error_and_disconnect(writer, &err.to_string()).await;
-                        return Err(err.into());
+                        // The literal string goes on the wire to the connecting
+                        // ESPHome client; the returned error is for this crate's
+                        // caller.
+                        write_error_and_disconnect(writer, "Handshake MAC failure").await;
+                        return Err(HandshakeError::MacFailure.into());
                     }
                     _ => {
                         debug!("Failed to read message: {}", e);
@@ -483,8 +489,8 @@ impl EspHomeApi {
             writer
                 .send(message_handshake.clone())
                 .await
-                .map_err(handshake_write_err)?;
-            writer.flush().await.map_err(handshake_write_err)?;
+                .map_err(handshake_io_err)?;
+            writer.flush().await.map_err(handshake_io_err)?;
         }
 
         debug!("Initialization done.");
@@ -663,7 +669,11 @@ impl EspHomeApi {
                         && answer_messages_tx_clone.send(response).await.is_err()
                     {
                         // The write loop has stopped; the connection is finished.
-                        return Err(Error::Disconnected(DisconnectReason::Eof));
+                        return Err(Error::Disconnected(if disconnect_requested {
+                            DisconnectReason::Requested
+                        } else {
+                            DisconnectReason::WriteClosed
+                        }));
                     }
                 }
             }

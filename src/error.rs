@@ -42,6 +42,12 @@ pub enum Error {
     /// An unexpected I/O error that is not a normal disconnect.
     #[error("io error: {0}")]
     Io(#[from] io::Error),
+
+    /// The connection's background task terminated without reporting an
+    /// outcome (for example, it panicked). The session is over, but nothing is
+    /// known about how it ended.
+    #[error("connection task terminated unexpectedly")]
+    TaskFailed,
 }
 
 /// Why a connection ended.
@@ -65,6 +71,11 @@ pub enum DisconnectReason {
     /// disconnect handshake.
     #[error("disconnect requested by peer")]
     Requested,
+
+    /// The write half of the connection stopped while the read half was still
+    /// processing, so a reply could no longer be delivered.
+    #[error("write side closed")]
+    WriteClosed,
 }
 
 /// A frame arrived but could not be decoded into a [`crate::parser::ProtoMessage`].
