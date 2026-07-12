@@ -411,6 +411,11 @@ impl EspHomeApi {
             }
         } else {
             if self.encryption_key.is_none() {
+                let encoder = FrameCodec::new(false);
+                let writer = FramedWrite::new(writer.into_inner(), encoder);
+                // The plaintext framing (0x00 preamble) tells the encrypted
+                // client that this device speaks plaintext, so it can raise a
+                // precise error instead of a generic socket failure.
                 write_error_and_disconnect(writer, "No encrypted communication allowed").await;
                 return Err(HandshakeError::EncryptionProtocolMismatch(
                     "a client requested an encrypted connection, but no encryption key is configured",

@@ -221,7 +221,7 @@ async fn test_protocol_change_from_encrypted_to_plaintext_on_plaintext_server() 
         .unwrap();
 
     let (client_stream, server_stream) = duplex(1024);
-    let (mut _client_read, mut client_write) = tokio::io::split(client_stream);
+    let (mut client_read, mut client_write) = tokio::io::split(client_stream);
 
     let start_future = api.start(server_stream);
     let write_future = async {
@@ -247,6 +247,18 @@ async fn test_protocol_change_from_encrypted_to_plaintext_on_plaintext_server() 
         "unexpected error: {}",
         error
     );
+
+    // The rejection frame must use plaintext framing so encrypted clients can
+    // tell the device speaks plaintext.
+    let mut rejection_preamble = [0u8; 1];
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        client_read.read_exact(&mut rejection_preamble),
+    )
+    .await
+    .expect("timed out waiting for rejection frame")
+    .expect("failed to read rejection frame preamble");
+    assert_eq!(rejection_preamble[0], 0x00);
 
     let (client_stream, server_stream) = duplex(1024);
     let (mut client_read, mut client_write) = tokio::io::split(client_stream);

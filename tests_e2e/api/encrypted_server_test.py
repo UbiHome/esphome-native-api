@@ -136,10 +136,7 @@ async def test_encrypted_client_is_rejected_by_plaintext_server(
         noise_psk="RcaiIwmN008EoAE7KkN2qCXic+hm540EhLvD30EnhhE=",
     )
 
-    # The server's rejection frame is indistinguishable from a noise server
-    # hello on the wire, so the client only observes the subsequent socket
-    # close; assert the broad connection error.
-    with pytest.raises(aioesphomeapi.core.APIConnectionError):
+    with pytest.raises(aioesphomeapi.core.EncryptionPlaintextAPIError):
         await api.connect(login=False)
 
 
