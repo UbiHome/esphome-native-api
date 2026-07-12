@@ -124,6 +124,22 @@ async def test_require_encryption_error(encrypted_server: EspHomeTestServer):
         await api.connect(login=False)
 
 
+async def test_encrypted_client_is_rejected_by_plaintext_server(
+    test_server: EspHomeTestServer,
+):
+    """A plaintext server should reject clients that request encryption"""
+
+    api = aioesphomeapi.APIClient(
+        "127.0.0.1",
+        test_server.port,
+        None,
+        noise_psk="RcaiIwmN008EoAE7KkN2qCXic+hm540EhLvD30EnhhE=",
+    )
+
+    with pytest.raises(aioesphomeapi.core.EncryptionPlaintextAPIError):
+        await api.connect(login=False)
+
+
 async def test_do_not_allow_password_authentication(
     encrypted_server: EspHomeTestServer,
 ):
