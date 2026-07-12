@@ -4,6 +4,7 @@ use log::debug;
 use noise_protocol::CipherState;
 use noise_rust_crypto::ChaCha20Poly1305;
 
+use crate::error::FrameError;
 use crate::parser;
 pub use parser::ProtoMessage;
 
@@ -25,23 +26,33 @@ pub(crate) fn generate_server_hello_frame(name: String, mac: Option<String>) -> 
 pub(crate) fn packet_to_message(
     buffer: &[u8],
     cipher_decrypt: &mut CipherState<ChaCha20Poly1305>,
-) -> Result<ProtoMessage, Box<dyn std::error::Error>> {
-    let decrypted_message_frame = cipher_decrypt.decrypt_vec(buffer).unwrap(); // "Error during decryption".to_string()
+) -> Result<ProtoMessage, FrameError> {
+    let decrypted_message_frame = cipher_decrypt
+        .decrypt_vec(buffer)
+        .map_err(|_| FrameError::Decrypt)?;
+
+    if decrypted_message_frame.len() < 4 {
+        return Err(FrameError::Malformed(
+            "encrypted frame shorter than header".to_string(),
+        ));
+    }
 
     let message_type = BigEndian::read_u16(&decrypted_message_frame[0..2]) as usize;
     let packet_content = &decrypted_message_frame[4..];
     debug!("Message type: {}", message_type);
     debug!("Message: {:?}", packet_content);
 
-    Ok(parser::parse_proto_message(message_type, packet_content).unwrap())
+    parser::parse_proto_message(message_type, packet_content)
 }
 
 pub(crate) fn message_to_packet(
     message: &ProtoMessage,
     cipher_encrypt: &mut CipherState<ChaCha20Poly1305>,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let response_content = parser::proto_to_vec(message)?;
-    let message_type = (parser::message_to_num(message).unwrap() as u16)
+) -> Result<Vec<u8>, FrameError> {
+    let response_content =
+        parser::proto_to_vec(message).map_err(|e| FrameError::Malformed(e.to_string()))?;
+    let message_type = (parser::message_to_num(message)
+        .map_err(|e| FrameError::Malformed(e.to_string()))? as u16)
         .to_be_bytes()
         .to_vec();
     let message_length = (response_content.len() as u16).to_be_bytes().to_vec();

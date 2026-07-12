@@ -33,6 +33,7 @@ tokio-util = { version = "0.7.17", features = ["codec"]  }
 tokio-stream = "0.1.17"
 bytes = "1.11.0"
 futures = "0.3.31"
+thiserror = "2"
 
 [workspace]
 resolver = "2"

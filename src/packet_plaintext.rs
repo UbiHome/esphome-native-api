@@ -1,20 +1,25 @@
 use log::debug;
 
+use crate::error::FrameError;
 use crate::parser;
 pub use parser::ProtoMessage;
 
-pub(crate) fn packet_to_message(buffer: &[u8]) -> Result<ProtoMessage, Box<dyn std::error::Error>> {
-    let message_type = buffer[0] as usize;
+pub(crate) fn packet_to_message(buffer: &[u8]) -> Result<ProtoMessage, FrameError> {
+    let message_type = *buffer
+        .first()
+        .ok_or_else(|| FrameError::Malformed("empty plaintext frame".to_string()))?
+        as usize;
     let packet_content = &buffer[1..];
     debug!("Message type: {}", message_type);
     debug!("Message: {:02X?}", packet_content);
-    Ok(parser::parse_proto_message(message_type, packet_content).unwrap())
+    parser::parse_proto_message(message_type, packet_content)
 }
 
-
-pub(crate) fn message_to_packet(message: &ProtoMessage) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let response_content = parser::proto_to_vec(message)?;
-    let message_type = parser::message_to_num(message)?;
+pub(crate) fn message_to_packet(message: &ProtoMessage) -> Result<Vec<u8>, FrameError> {
+    let response_content =
+        parser::proto_to_vec(message).map_err(|e| FrameError::Malformed(e.to_string()))?;
+    let message_type =
+        parser::message_to_num(message).map_err(|e| FrameError::Malformed(e.to_string()))?;
     let message_bit: Vec<u8> = vec![message_type];
 
     Ok([message_bit, response_content].concat())

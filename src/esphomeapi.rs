@@ -69,6 +69,7 @@ use tokio_util::codec::FramedRead;
 use tokio_util::codec::FramedWrite;
 use typed_builder::TypedBuilder;
 
+use crate::error::{DisconnectReason, Error, FrameError, HandshakeError};
 use crate::frame::FrameCodec;
 use crate::packet_encrypted;
 use crate::packet_plaintext;
@@ -84,16 +85,65 @@ where
 {
     error!("API Failure: {}. Disconnecting.", message);
     let packet = [[1].to_vec(), message.as_bytes().to_vec()].concat();
-    writer.send(packet).await.unwrap();
-    writer.flush().await.unwrap();
+    if let Err(err) = writer.send(packet).await {
+        debug!("failed to send error frame to peer: {:?}", err);
+    }
+    if let Err(err) = writer.flush().await {
+        debug!("failed to flush error frame to peer: {:?}", err);
+    }
     let mut tcp_write = writer.into_inner();
     if let Err(err) = tcp_write.shutdown().await {
         error!("failed to shutdown socket: {:?}", err);
     }
 }
 
-const ERROR_ONLY_ENCRYPTED: &str = "Only key encryption is enabled";
-const ERROR_HANDSHAKE_MAC_FAILURE: &str = "Handshake MAC failure";
+/// Classify an I/O error surfaced by the framed reader into a typed [`Error`].
+///
+/// A peer going away (`ConnectionReset`, `BrokenPipe`, …) is an expected
+/// terminal condition, not a failure; malformed framing is a [`FrameError`];
+/// anything else is a genuine I/O fault.
+fn classify_read_error(err: std::io::Error) -> Error {
+    use std::io::ErrorKind::*;
+    match err.kind() {
+        ConnectionReset | BrokenPipe | ConnectionAborted | NotConnected | UnexpectedEof => {
+            Error::Disconnected(DisconnectReason::Reset(err.kind()))
+        }
+        InvalidData => Error::Frame(FrameError::Malformed(err.to_string())),
+        _ => Error::Io(err),
+    }
+}
+
+/// Whether a writer-side I/O error means the peer has gone away (so we should
+/// terminate quietly rather than log a fault).
+fn is_peer_gone(err: &std::io::Error) -> bool {
+    use std::io::ErrorKind::*;
+    matches!(
+        err.kind(),
+        ConnectionReset | BrokenPipe | ConnectionAborted | NotConnected
+    )
+}
+
+/// Map a writer-side I/O error during the handshake into a typed [`Error`].
+fn handshake_write_err(err: std::io::Error) -> Error {
+    if is_peer_gone(&err) {
+        Error::Handshake(HandshakeError::Aborted)
+    } else {
+        Error::Io(err)
+    }
+}
+
+/// Read the next frame during the handshake phase, mapping a mid-handshake
+/// disconnect to [`HandshakeError::Aborted`].
+async fn read_handshake_frame<R>(reader: &mut FramedRead<R, FrameCodec>) -> Result<Vec<u8>, Error>
+where
+    R: AsyncRead + Unpin,
+{
+    match reader.next().await {
+        Some(Ok(frame)) => Ok(frame),
+        Some(Err(e)) => Err(classify_read_error(e)),
+        None => Err(Error::Handshake(HandshakeError::Aborted)),
+    }
+}
 
 /// Low-level ESPHome native API client.
 ///
@@ -289,7 +339,7 @@ impl EspHomeApi {
 
         let peeked_bytes = stream_read.fill_buf().await?;
         if peeked_bytes.is_empty() {
-            return Err("No data".into());
+            return Err(HandshakeError::NoData.into());
         }
 
         trace!("TCP Peeked: {:02X?}", &peeked_bytes[0..1]);
@@ -306,7 +356,7 @@ impl EspHomeApi {
                 false
             }
             _ => {
-                return Err(format!("Invalid marker byte {}", preamble).into());
+                return Err(HandshakeError::InvalidMarker(preamble as u8).into());
             }
         };
         let encrypted = !plaintext_communication;
@@ -320,25 +370,29 @@ impl EspHomeApi {
             if self.encryption_key.is_some() {
                 let encoder = FrameCodec::new(true);
                 let writer = FramedWrite::new(writer.into_inner(), encoder);
-                write_error_and_disconnect(writer, ERROR_ONLY_ENCRYPTED).await;
-                return Err(ERROR_ONLY_ENCRYPTED.into());
+                let err = HandshakeError::OnlyEncryptedAllowed;
+                write_error_and_disconnect(writer, &err.to_string()).await;
+                return Err(err.into());
             }
         } else {
             if self.encryption_key.is_none() {
                 write_error_and_disconnect(writer, "No encrypted communication allowed").await;
-                return Err("No encryption key set, but encrypted communication requested.".into());
+                return Err(HandshakeError::EncryptionNotAllowed.into());
             }
 
-            let frame_noise_hello = reader.next().await.unwrap().unwrap();
+            let frame_noise_hello = read_handshake_frame(&mut reader).await?;
             debug!("Frame 1: {:02X?}", &frame_noise_hello);
 
             let message_server_hello =
                 packet_encrypted::generate_server_hello_frame(self.name.clone(), self.mac.clone());
 
-            writer.send(message_server_hello.clone()).await.unwrap();
-            writer.flush().await.unwrap();
+            writer
+                .send(message_server_hello.clone())
+                .await
+                .map_err(handshake_write_err)?;
+            writer.flush().await.map_err(handshake_write_err)?;
 
-            let frame_handshake_request = reader.next().await.unwrap().unwrap();
+            let frame_handshake_request = read_handshake_frame(&mut reader).await?;
             debug!("Frame 2: {:02X?}", &frame_handshake_request);
 
             // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
@@ -356,7 +410,7 @@ impl EspHomeApi {
 
             let noise_psk = BASE64_STANDARD
                 .decode(encryption_key.as_ref().unwrap())
-                .unwrap();
+                .map_err(|e| Error::Config(format!("encryption key is not valid base64: {e}")))?;
 
             handshake_state.push_psk(&noise_psk);
             // Ignore message type byte
@@ -364,8 +418,9 @@ impl EspHomeApi {
                 Ok(_) => {}
                 Err(e) => match e.kind() {
                     ErrorKind::Decryption => {
-                        write_error_and_disconnect(writer, ERROR_HANDSHAKE_MAC_FAILURE).await;
-                        return Err(ERROR_HANDSHAKE_MAC_FAILURE.into());
+                        let err = HandshakeError::MacFailure;
+                        write_error_and_disconnect(writer, &err.to_string()).await;
+                        return Err(err.into());
                     }
                     _ => {
                         debug!("Failed to read message: {}", e);
@@ -373,7 +428,9 @@ impl EspHomeApi {
                 },
             }
 
-            let out = handshake_state.write_message_vec(b"").unwrap();
+            let out = handshake_state
+                .write_message_vec(b"")
+                .map_err(|e| Error::Handshake(HandshakeError::Crypto(e.to_string())))?;
             {
                 let mut encrypt_cipher_changer = encrypt_cypher.lock().await;
                 let mut decrypt_cipher_changer = decrypt_cypher.lock().await;
@@ -386,8 +443,11 @@ impl EspHomeApi {
             message_handshake.extend(out);
 
             debug!("Sending handshake");
-            writer.send(message_handshake.clone()).await.unwrap();
-            writer.flush().await.unwrap();
+            writer
+                .send(message_handshake.clone())
+                .await
+                .map_err(handshake_write_err)?;
+            writer.flush().await.map_err(handshake_write_err)?;
         }
 
         debug!("Initialization done.");
@@ -399,55 +459,78 @@ impl EspHomeApi {
         let encrypt_cypher_for_write = encrypt_cypher;
         tokio::spawn(async move {
             loop {
-                let answer_message: ProtoMessage;
-
                 // Wait for any new message
-                tokio::select! {
+                let answer_message = tokio::select! {
                     biased; // Poll cancellation_write_rx first
                     cancel_message = &mut cancellation_write_rx => {
-                        debug!("Write loop received cancellation signal ({}), exiting.", cancel_message.unwrap());
+                        match cancel_message {
+                            Ok(reason) => debug!("Write loop received cancellation signal ({reason}), exiting."),
+                            Err(_) => debug!("Write loop cancellation channel dropped, exiting."),
+                        }
                         break;
                     }
-                    message = answer_messages_rx.recv() => {
-                        answer_message = message.unwrap();
+                    message = answer_messages_rx.recv() => match message {
+                        Some(message) => message,
+                        None => {
+                            debug!("Write loop: all senders dropped, exiting.");
+                            break;
+                        }
                     }
                 };
 
                 debug!("Answer message: {:?}", answer_message);
 
-                if plaintext_communication {
-                    writer
-                        .send(packet_plaintext::message_to_packet(&answer_message).unwrap())
-                        .await
-                        .unwrap();
-                    // answer_buf =
-                    //     [answer_buf, to_unencrypted_frame(&answer_message).unwrap()].concat();
+                let packet = if plaintext_communication {
+                    match packet_plaintext::message_to_packet(&answer_message) {
+                        Ok(packet) => packet,
+                        Err(e) => {
+                            error!("Write loop: failed to encode outgoing message: {e}");
+                            break;
+                        }
+                    }
                 } else {
                     // Use normal messaging
                     let mut encrypt_cipher_changer = encrypt_cypher_for_write.lock().await;
-                    writer
-                        .send(
-                            packet_encrypted::message_to_packet(
-                                &answer_message,
-                                &mut *encrypt_cipher_changer.as_mut().unwrap(),
-                            )
-                            .unwrap(),
-                        )
-                        .await
-                        .unwrap();
+                    let cipher = match encrypt_cipher_changer.as_mut() {
+                        Some(cipher) => cipher,
+                        None => {
+                            error!("Write loop: encryption cipher not initialized, exiting.");
+                            break;
+                        }
+                    };
+                    match packet_encrypted::message_to_packet(&answer_message, cipher) {
+                        Ok(packet) => packet,
+                        Err(e) => {
+                            error!("Write loop: failed to encode outgoing message: {e}");
+                            break;
+                        }
+                    }
+                };
+
+                if let Err(e) = writer.send(packet).await {
+                    if is_peer_gone(&e) {
+                        debug!("Write loop: peer gone while sending, exiting.");
+                    } else {
+                        error!("Write loop: failed to send message: {e}");
+                    }
+                    break;
                 }
-                writer.flush().await.unwrap();
+                if let Err(e) = writer.flush().await {
+                    if is_peer_gone(&e) {
+                        debug!("Write loop: peer gone while flushing, exiting.");
+                    } else {
+                        error!("Write loop: failed to flush message: {e}");
+                    }
+                    break;
+                }
 
                 if matches!(answer_message, ProtoMessage::DisconnectResponse(_)) {
                     debug!("Disconnecting");
                     let mut tcp_write = writer.into_inner();
-                    match tcp_write.shutdown().await {
-                        Err(err) => {
-                            error!("failed to shutdown socket: {:?}", err);
-                            break;
-                        }
-                        _ => break,
+                    if let Err(err) = tcp_write.shutdown().await {
+                        error!("failed to shutdown socket: {:?}", err);
                     }
+                    break;
                 }
             }
         });
@@ -456,83 +539,104 @@ impl EspHomeApi {
         let answer_messages_tx_clone = answer_messages_tx.clone();
         // Read Loop
         tokio::spawn(async move {
-            loop {
-                let next = reader.next().await;
-                if next.is_none() {
-                    info!("Read loop stopped because stream finished");
-                    // If sending fails, the write loop is probably already closed
-                    let _ = cancellation_write_tx.send("read loop finished");
-                    break;
-                }
-                let frame = next.unwrap().unwrap();
-                trace!("TCP Receive: {:02X?}", &frame);
-
-                let message;
-                if encrypted {
-                    let mut decrypt_cipher_changer = decrypt_cypher.lock().await;
-                    message = packet_encrypted::packet_to_message(
-                        &frame,
-                        &mut *decrypt_cipher_changer.as_mut().unwrap(),
-                    )
-                    .unwrap();
-                } else {
-                    message = packet_plaintext::packet_to_message(&frame).unwrap();
-                }
-
-                // Authenticated Messages
-                match &message {
-                    ProtoMessage::DisconnectRequest(disconnect_request) => {
-                        debug!("DisconnectRequest: {:?}", disconnect_request);
-                        let response_message = DisconnectResponse {};
-                        answer_messages_tx_clone
-                            .send(ProtoMessage::DisconnectResponse(response_message))
-                            .await
-                            .unwrap();
-                        continue;
-                    }
-                    ProtoMessage::PingRequest(ping_request) => {
-                        debug!("PingRequest: {:?}", ping_request);
-                        let response_message = PingResponse {};
-                        answer_messages_tx_clone
-                            .send(ProtoMessage::PingResponse(response_message))
-                            .await
-                            .unwrap();
-                    }
-                    ProtoMessage::DeviceInfoRequest(device_info_request) => {
-                        debug!("DeviceInfoRequest: {:?}", device_info_request);
-                        answer_messages_tx_clone
-                            .send(ProtoMessage::DeviceInfoResponse(device_info.clone()))
-                            .await
-                            .unwrap();
-                    }
-                    ProtoMessage::HelloRequest(hello_request) => {
-                        debug!("HelloRequest: {:?}", hello_request);
-
-                        answer_messages_tx_clone
-                            .send(ProtoMessage::HelloResponse(hello_response.clone()))
-                            .await
-                            .unwrap();
-                    }
-                    ProtoMessage::AuthenticationRequest(authentication_request) => {
-                        debug!("AuthenticationRequest: {:?}", authentication_request);
-
-                        if authentication_request.password != "" {
-                            info!("Password Authentication is not supported");
-                        } else {
-                            let response_message = AuthenticationResponse {
-                                invalid_password: false,
-                            };
-                            answer_messages_tx_clone
-                                .send(ProtoMessage::AuthenticationResponse(response_message))
-                                .await
-                                .unwrap();
+            let outcome: Result<(), Error> = async move {
+                let mut disconnect_requested = false;
+                loop {
+                    let frame = match reader.next().await {
+                        None => {
+                            return Err(Error::Disconnected(if disconnect_requested {
+                                DisconnectReason::Requested
+                            } else {
+                                DisconnectReason::Eof
+                            }));
                         }
-                    }
-                    message => {
-                        outgoing_messages_tx.send(message.clone()).unwrap();
+                        Some(Ok(frame)) => frame,
+                        Some(Err(e)) => return Err(classify_read_error(e)),
+                    };
+                    trace!("TCP Receive: {:02X?}", &frame);
+
+                    let decoded = if encrypted {
+                        let mut decrypt_cipher_changer = decrypt_cypher.lock().await;
+                        match decrypt_cipher_changer.as_mut() {
+                            Some(cipher) => packet_encrypted::packet_to_message(&frame, cipher),
+                            None => Err(FrameError::Malformed(
+                                "decryption cipher not initialized".to_string(),
+                            )),
+                        }
+                    } else {
+                        packet_plaintext::packet_to_message(&frame)
+                    };
+
+                    let message = match decoded {
+                        Ok(message) => message,
+                        // Forward-compatible: an unknown message type (for example
+                        // one introduced by a newer ESPHome release) is skipped so
+                        // the connection stays healthy instead of being torn down.
+                        Err(FrameError::UnknownMessageType(message_type)) => {
+                            debug!("Ignoring unknown message type {message_type}");
+                            continue;
+                        }
+                        Err(e) => return Err(e.into()),
+                    };
+
+                    // Protocol-level messages we answer ourselves produce a
+                    // response; everything else is forwarded to the consumer.
+                    let response: Option<ProtoMessage> = match &message {
+                        ProtoMessage::DisconnectRequest(disconnect_request) => {
+                            debug!("DisconnectRequest: {:?}", disconnect_request);
+                            disconnect_requested = true;
+                            Some(ProtoMessage::DisconnectResponse(DisconnectResponse {}))
+                        }
+                        ProtoMessage::PingRequest(ping_request) => {
+                            debug!("PingRequest: {:?}", ping_request);
+                            Some(ProtoMessage::PingResponse(PingResponse {}))
+                        }
+                        ProtoMessage::DeviceInfoRequest(device_info_request) => {
+                            debug!("DeviceInfoRequest: {:?}", device_info_request);
+                            Some(ProtoMessage::DeviceInfoResponse(device_info.clone()))
+                        }
+                        ProtoMessage::HelloRequest(hello_request) => {
+                            debug!("HelloRequest: {:?}", hello_request);
+                            Some(ProtoMessage::HelloResponse(hello_response.clone()))
+                        }
+                        ProtoMessage::AuthenticationRequest(authentication_request) => {
+                            debug!("AuthenticationRequest: {:?}", authentication_request);
+                            if !authentication_request.password.is_empty() {
+                                info!("Password Authentication is not supported");
+                                None
+                            } else {
+                                Some(ProtoMessage::AuthenticationResponse(
+                                    AuthenticationResponse {
+                                        invalid_password: false,
+                                    },
+                                ))
+                            }
+                        }
+                        other => {
+                            // No active receivers is normal (the consumer dropped
+                            // its handle); drop the message rather than panicking.
+                            let _ = outgoing_messages_tx.send(other.clone());
+                            None
+                        }
+                    };
+
+                    if let Some(response) = response
+                        && answer_messages_tx_clone.send(response).await.is_err()
+                    {
+                        // The write loop has stopped; the connection is finished.
+                        return Err(Error::Disconnected(DisconnectReason::Eof));
                     }
                 }
             }
+            .await;
+
+            match &outcome {
+                Ok(()) => {}
+                Err(Error::Disconnected(reason)) => info!("Read loop stopped: {reason}"),
+                Err(e) => error!("Read loop stopped with error: {e}"),
+            }
+            // If sending fails, the write loop is probably already closed.
+            let _ = cancellation_write_tx.send("read loop finished");
         });
 
         Ok((answer_messages_tx.clone(), outgoing_messages_rx))

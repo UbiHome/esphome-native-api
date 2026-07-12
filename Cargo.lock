@@ -479,6 +479,7 @@ dependencies = [
  "pretty_env_logger",
  "prost",
  "test-log",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tokio-util",
