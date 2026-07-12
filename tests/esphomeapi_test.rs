@@ -746,3 +746,36 @@ async fn test_wait_reports_task_failed_when_connection_task_panics() {
         "unexpected outcome: {outcome:?}"
     );
 }
+
+#[tokio::test]
+async fn test_start_fails_with_malformed_frame_on_empty_handshake_frame() {
+    let (client_stream, server_stream) = duplex(1024);
+    let (_client_read, mut client_write) = tokio::io::split(client_stream);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .encryption_key(NOISE_PSK.to_string())
+        .build()
+        .unwrap();
+
+    let start_future = api.start(server_stream);
+    let write_future = async {
+        client_write
+            .write_all(&encrypted_client_hello_frame())
+            .await
+            .expect("failed to write encrypted hello frame");
+        // An empty frame where the handshake request is expected.
+        client_write
+            .write_all(&encrypted_client_hello_frame())
+            .await
+            .expect("failed to write empty handshake frame");
+        client_write.flush().await.expect("failed to flush");
+    };
+
+    let (start_result, _) = tokio::join!(start_future, write_future);
+    let error = start_result.expect_err("empty handshake frame should be rejected");
+    assert!(
+        matches!(error, Error::Handshake(HandshakeError::MalformedFrame)),
+        "unexpected error: {error}"
+    );
+}

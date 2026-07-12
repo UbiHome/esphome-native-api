@@ -455,7 +455,10 @@ impl EspHomeApi {
 
             handshake_state.push_psk(psk);
             // Ignore message type byte
-            match handshake_state.read_message_vec(&frame_handshake_request[1..]) {
+            let handshake_payload = frame_handshake_request
+                .get(1..)
+                .ok_or(HandshakeError::MalformedFrame)?;
+            match handshake_state.read_message_vec(handshake_payload) {
                 Ok(_) => {}
                 Err(e) => match e.kind() {
                     ErrorKind::Decryption => {

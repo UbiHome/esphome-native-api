@@ -127,6 +127,10 @@ pub enum HandshakeError {
     #[error("encryption protocol mismatch: {0}")]
     EncryptionProtocolMismatch(&'static str),
 
+    /// The peer sent a handshake frame that is too short to be valid.
+    #[error("malformed handshake frame")]
+    MalformedFrame,
+
     /// The noise handshake failed its MAC check (wrong encryption key).
     #[error("Handshake MAC failure")]
     MacFailure,
