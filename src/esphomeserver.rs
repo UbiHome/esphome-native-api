@@ -150,9 +150,10 @@ impl EspHomeServer {
     ///
     /// # Returns
     ///
-    /// Returns a tuple containing:
-    /// - A sender for outgoing messages to the ESPHome device
-    /// - A receiver for incoming messages from the ESPHome device
+    /// Returns a [`Connection`] handle. Use [`Connection::sender`] to send
+    /// messages to the ESPHome device, [`Connection::receiver`] to receive
+    /// messages from it, and [`Connection::wait`] to observe when — and why —
+    /// the connection ends.
     ///
     /// # Errors
     ///
@@ -204,7 +205,6 @@ impl EspHomeServer {
                         break;
                     }
                 };
-                // Process the received message
                 debug!("Received message: {:?}", message);
 
                 match message {
@@ -221,8 +221,6 @@ impl EspHomeServer {
                         ));
                     }
                     other_message => {
-                        // Forward the message to the outgoing channel; ignore the
-                        // error when there are no receivers.
                         let _ = outgoing_messages_tx.send(other_message);
                     }
                 }

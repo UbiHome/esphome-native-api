@@ -45,7 +45,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// Construct a connection handle from its parts. Internal to the crate.
+    /// Construct a connection handle from its parts.
     pub(crate) fn new(
         sender: mpsc::Sender<ProtoMessage>,
         receiver: broadcast::Receiver<ProtoMessage>,

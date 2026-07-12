@@ -279,7 +279,7 @@ impl EspHomeApi {
     /// # Returns
     ///
     /// Returns a [`Connection`] handle. Use [`Connection::sender`] to send
-    /// messages to the device, [`Connection::incoming`] to receive messages from
+    /// messages to the device, [`Connection::receiver`] to receive messages from
     /// it, and [`Connection::wait`] to observe when — and why — the connection
     /// ends.
     ///
@@ -361,8 +361,6 @@ impl EspHomeApi {
         // Stage 1: Initialization
         trace!("Init Connection: Stage 1");
 
-        // The encryption key was decoded and validated at build time (see the
-        // `From<EspHomeApi>` impl above), so `self.noise_psk` is ready to use.
         let (stream_read, stream_write) = tokio::io::split(stream);
         let mut stream_read = BufReader::new(stream_read);
 
@@ -399,9 +397,8 @@ impl EspHomeApi {
             if self.encryption_key.is_some() {
                 let encoder = FrameCodec::new(true);
                 let writer = FramedWrite::new(writer.into_inner(), encoder);
-                // First string is the on-the-wire message shown to the connecting
-                // ESPHome client (kept verbatim for compatibility); the returned
-                // error explains the situation to this crate's caller.
+                // The literal string goes on the wire to the connecting ESPHome
+                // client; the returned error is for this crate's caller.
                 write_error_and_disconnect(writer, "Only key encryption is enabled").await;
                 return Err(HandshakeError::EncryptionProtocolMismatch(
                     "a client connected in plaintext, but an encryption key is configured (encryption is required)",
@@ -532,7 +529,6 @@ impl EspHomeApi {
                         }
                     }
                 } else {
-                    // Use normal messaging
                     let mut encrypt_cipher_changer = encrypt_cypher_for_write.lock().await;
                     let cipher = match encrypt_cipher_changer.as_mut() {
                         Some(cipher) => cipher,
@@ -657,7 +653,7 @@ impl EspHomeApi {
                         }
                         other => {
                             // No active receivers is normal (the consumer dropped
-                            // its handle); drop the message rather than panicking.
+                            // its handle); the message is simply dropped.
                             let _ = outgoing_messages_tx.send(other.clone());
                             None
                         }
