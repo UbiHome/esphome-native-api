@@ -18,11 +18,11 @@
 //!     
 //!     let mut api = EspHomeApi::builder()
 //!         .name("my-client".to_string())
-//!         .build();
+//!         .build()?;
 //!     
 //!     let connection = api.start(stream).await?;
 //!     let tx = connection.sender();
-//!     let mut rx = connection.incoming();
+//!     let mut rx = connection.receiver();
 //!     # let _ = (tx, &mut rx);
 //!     Ok(())
 //! }
@@ -41,11 +41,11 @@
 //!     let mut api = EspHomeApi::builder()
 //!         .name("my-client".to_string())
 //!         .encryption_key("your-base64-encoded-key".to_string())
-//!         .build();
+//!         .build()?;
 //!     
 //!     let connection = api.start(stream).await?;
 //!     let tx = connection.sender();
-//!     let mut rx = connection.incoming();
+//!     let mut rx = connection.receiver();
 //!     # let _ = (tx, &mut rx);
 //!     Ok(())
 //! }
@@ -152,6 +152,10 @@ where
     }
 }
 
+/// Fallible output of [`EspHomeApi`]'s builder. An `Err` means the configuration
+/// was invalid — currently, an encryption key that is not valid base64.
+pub type EspHomeApiBuildResult = Result<EspHomeApi, Error>;
+
 /// Low-level ESPHome native API client.
 ///
 /// `EspHomeApi` provides direct access to the ESPHome native API protocol,
@@ -185,15 +189,21 @@ where
 ///     .api_version_major(1)
 ///     .api_version_minor(10)
 ///     .friendly_name("Bedroom Light".to_string())
-///     .build();
+///     .build().unwrap();
 /// ```
 #[derive(TypedBuilder, Clone)]
+#[builder(build_method(into = EspHomeApiBuildResult))]
 pub struct EspHomeApi {
     // Private fields
     name: String,
 
     #[builder(default = None, setter(strip_option(fallback=encryption_key_opt)))]
     encryption_key: Option<String>,
+
+    /// Decoded pre-shared key, populated from `encryption_key` at build time so
+    /// that a misconfigured key fails during `build()` rather than at connect.
+    #[builder(default, setter(skip))]
+    noise_psk: Option<Vec<u8>>,
 
     #[builder(default = 1)]
     api_version_major: u32,
@@ -236,6 +246,22 @@ pub struct EspHomeApi {
     voice_assistant_feature_flags: u32,
 }
 
+/// Validates and decodes the configured encryption key when the builder's
+/// `build()` runs, so a misconfiguration surfaces as [`Error::Config`] at
+/// construction rather than partway through the connection handshake.
+impl From<EspHomeApi> for EspHomeApiBuildResult {
+    fn from(mut api: EspHomeApi) -> Self {
+        api.noise_psk =
+            match api.encryption_key.as_deref() {
+                Some(key) => Some(BASE64_STANDARD.decode(key).map_err(|e| {
+                    Error::Config(format!("encryption key is not valid base64: {e}"))
+                })?),
+                None => None,
+            };
+        Ok(api)
+    }
+}
+
 /// Handles the ESPHome API protocol with encryption support.
 impl EspHomeApi {
     /// Starts the API client and establishes communication with an ESPHome device.
@@ -272,10 +298,10 @@ impl EspHomeApi {
     /// # use tokio::net::TcpStream;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let stream = TcpStream::connect("192.168.1.100:6053").await?;
-    /// let api = EspHomeApi::builder().name("client".to_string()).build();
+    /// let api = EspHomeApi::builder().name("client".to_string()).build()?;
     /// let connection = api.start(stream).await?;
     /// let tx = connection.sender();
-    /// let mut rx = connection.incoming();
+    /// let mut rx = connection.receiver();
     /// # let _ = (tx, &mut rx);
     /// # Ok(())
     /// # }
@@ -334,8 +360,9 @@ impl EspHomeApi {
 
         // Stage 1: Initialization
         trace!("Init Connection: Stage 1");
-        let encryption_key = self.encryption_key.clone();
 
+        // The encryption key was decoded and validated at build time (see the
+        // `From<EspHomeApi>` impl above), so `self.noise_psk` is ready to use.
         let (stream_read, stream_write) = tokio::io::split(stream);
         let mut stream_read = BufReader::new(stream_read);
 
@@ -372,14 +399,22 @@ impl EspHomeApi {
             if self.encryption_key.is_some() {
                 let encoder = FrameCodec::new(true);
                 let writer = FramedWrite::new(writer.into_inner(), encoder);
-                let err = HandshakeError::OnlyEncryptedAllowed;
-                write_error_and_disconnect(writer, &err.to_string()).await;
-                return Err(err.into());
+                // First string is the on-the-wire message shown to the connecting
+                // ESPHome client (kept verbatim for compatibility); the returned
+                // error explains the situation to this crate's caller.
+                write_error_and_disconnect(writer, "Only key encryption is enabled").await;
+                return Err(HandshakeError::EncryptionProtocolMismatch(
+                    "a client connected in plaintext, but an encryption key is configured (encryption is required)",
+                )
+                .into());
             }
         } else {
             if self.encryption_key.is_none() {
                 write_error_and_disconnect(writer, "No encrypted communication allowed").await;
-                return Err(HandshakeError::EncryptionNotAllowed.into());
+                return Err(HandshakeError::EncryptionProtocolMismatch(
+                    "a client requested an encrypted connection, but no encryption key is configured",
+                )
+                .into());
             }
 
             let frame_noise_hello = read_handshake_frame(&mut reader).await?;
@@ -410,11 +445,14 @@ impl EspHomeApi {
                     None,
                 );
 
-            let noise_psk = BASE64_STANDARD
-                .decode(encryption_key.as_ref().unwrap())
-                .map_err(|e| Error::Config(format!("encryption key is not valid base64: {e}")))?;
+            let psk = match self.noise_psk.as_ref() {
+                Some(psk) => psk,
+                // Unreachable: we return above when no key is configured but the
+                // peer requested encryption. Handled defensively to avoid a panic.
+                None => return Err(Error::Config("encryption key missing".to_string())),
+            };
 
-            handshake_state.push_psk(&noise_psk);
+            handshake_state.push_psk(psk);
             // Ignore message type byte
             match handshake_state.read_message_vec(&frame_handshake_request[1..]) {
                 Ok(_) => {}

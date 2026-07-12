@@ -23,24 +23,24 @@ use crate::parser::ProtoMessage;
 /// # use tokio::net::TcpStream;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let stream = TcpStream::connect("192.168.1.100:6053").await?;
-/// let api = EspHomeApi::builder().name("client".to_string()).build();
+/// let api = EspHomeApi::builder().name("client".to_string()).build()?;
 /// let connection = api.start(stream).await?;
 ///
 /// let sender = connection.sender();
-/// let mut incoming = connection.incoming();
+/// let mut receiver = connection.receiver();
 ///
 /// match connection.wait().await {
 ///     Ok(()) | Err(Error::Disconnected(_)) => { /* peer left — expected */ }
 ///     Err(e) => eprintln!("connection fault: {e}"),
 /// }
-/// # let _ = (sender, &mut incoming);
+/// # let _ = (sender, &mut receiver);
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Debug)]
 pub struct Connection {
     sender: mpsc::Sender<ProtoMessage>,
-    incoming: broadcast::Receiver<ProtoMessage>,
+    receiver: broadcast::Receiver<ProtoMessage>,
     done: oneshot::Receiver<Result<(), Error>>,
 }
 
@@ -48,12 +48,12 @@ impl Connection {
     /// Construct a connection handle from its parts. Internal to the crate.
     pub(crate) fn new(
         sender: mpsc::Sender<ProtoMessage>,
-        incoming: broadcast::Receiver<ProtoMessage>,
+        receiver: broadcast::Receiver<ProtoMessage>,
         done: oneshot::Receiver<Result<(), Error>>,
     ) -> Self {
         Self {
             sender,
-            incoming,
+            receiver,
             done,
         }
     }
@@ -64,10 +64,10 @@ impl Connection {
         self.sender.clone()
     }
 
-    /// Subscribe to messages received from the peer. Each call yields a fresh
+    /// Returns a receiver for messages from the peer. Each call yields a fresh
     /// [`broadcast::Receiver`] that observes messages sent from this point on.
-    pub fn incoming(&self) -> broadcast::Receiver<ProtoMessage> {
-        self.incoming.resubscribe()
+    pub fn receiver(&self) -> broadcast::Receiver<ProtoMessage> {
+        self.receiver.resubscribe()
     }
 
     /// Wait for the connection to terminate and return its outcome.
@@ -75,7 +75,7 @@ impl Connection {
     /// Returns `Ok(())` for a clean shutdown, `Err(Error::Disconnected(_))` when
     /// the peer went away (the normal case), or another [`Error`] for a genuine
     /// fault. Consuming `self` here is deliberate: obtain a [`Connection::sender`]
-    /// and [`Connection::incoming`] first if you need them for the session.
+    /// and [`Connection::receiver`] first if you need them for the session.
     pub async fn wait(self) -> Result<(), Error> {
         // If the read-loop task was dropped without reporting (should not happen
         // in normal operation), treat it as a clean shutdown.

@@ -1,6 +1,7 @@
 use std::env;
 use std::{future, net::SocketAddr, time::Duration};
 
+use esphome_native_api::hash::hash_fnv1;
 use esphome_native_api::{
     esphomeapi::EspHomeApi,
     parser::ProtoMessage,
@@ -12,7 +13,6 @@ use esphome_native_api::{
 };
 use log::{LevelFilter, debug, info};
 use tokio::{net::TcpSocket, signal, time::sleep};
-use esphome_native_api::hash::hash_fnv1;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -57,7 +57,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .manufacturer("Test Inc.".to_string())
                     .model("Test Model".to_string())
                     .suggested_area("Test Area".to_string())
-                    .build();
+                    .build()
+                    .expect("Failed to build server config");
 
                 let entities = vec![
                     // All supported entities in alphabetical order
@@ -138,12 +139,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }),
                 ];
 
-                let connection = server
-                    .start(stream)
-                    .await
-                    .expect("Failed to start server");
+                let connection = server.start(stream).await.expect("Failed to start server");
                 let tx = connection.sender();
-                let mut rx = connection.incoming();
+                let mut rx = connection.receiver();
                 let tx_clone = tx.clone();
                 debug!("Server started");
 

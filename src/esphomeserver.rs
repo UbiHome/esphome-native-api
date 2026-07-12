@@ -27,7 +27,7 @@
 //!     
 //!     let connection = server.start(stream).await?;
 //!     let tx = connection.sender();
-//!     let mut rx = connection.incoming();
+//!     let mut rx = connection.receiver();
 //!     # let _ = (tx, &mut rx);
 //!
 //!     Ok(())
@@ -169,7 +169,7 @@ impl EspHomeServer {
     /// let mut server = EspHomeServer::builder().name("client".to_string()).build();
     /// let connection = server.start(stream).await?;
     /// let tx = connection.sender();
-    /// let mut rx = connection.incoming();
+    /// let mut rx = connection.receiver();
     /// # let _ = (tx, &mut rx);
     /// # Ok(())
     /// # }
@@ -187,10 +187,10 @@ impl EspHomeServer {
             // .manufacturer(self.manufacturer)
             // .model(self.model)
             // .suggested_area(self.suggested_area)
-            .build();
+            .build()?;
         let api_connection = server.start(tcp_stream).await?;
         let messages_tx = api_connection.sender();
-        let mut messages_rx = api_connection.incoming();
+        let mut messages_rx = api_connection.receiver();
         let (outgoing_messages_tx, outgoing_messages_rx) = broadcast::channel::<ProtoMessage>(16);
         let (done_tx, done_rx) = tokio::sync::oneshot::channel::<Result<(), Error>>();
         let api_components_clone = self.components_by_key.clone();

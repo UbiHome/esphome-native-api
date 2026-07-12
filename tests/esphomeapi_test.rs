@@ -73,7 +73,8 @@ fn encrypted_client_encrypted_hello_frame() -> Vec<u8> {
 fn test_basic_server_instantiation() {
     EspHomeApi::builder()
         .name(TEST_DEVICE_NAME.to_string())
-        .build();
+        .build()
+        .unwrap();
 }
 
 #[tokio::test]
@@ -83,7 +84,8 @@ async fn test_hello_message_and_response_plaintext() {
 
     let api = EspHomeApi::builder()
         .name(TEST_DEVICE_NAME.to_string())
-        .build();
+        .build()
+        .unwrap();
 
     let request_frame = plaintext_hello_request_frame();
 
@@ -121,7 +123,8 @@ async fn test_protocol_change_from_plaintext_to_encrypted_on_encrypted_server() 
     let api = EspHomeApi::builder()
         .name(TEST_DEVICE_NAME.to_string())
         .encryption_key(NOISE_PSK.to_string())
-        .build();
+        .build()
+        .unwrap();
 
     let request_frame = plaintext_hello_request_frame();
 
@@ -143,7 +146,7 @@ async fn test_protocol_change_from_plaintext_to_encrypted_on_encrypted_server() 
     let (start_result, _) = tokio::join!(start_future, write_future);
     let error = start_result.expect_err("plaintext connection should be rejected");
     assert!(
-        error.to_string().contains("Only key encryption is enabled"),
+        error.to_string().contains("encryption protocol mismatch"),
         "unexpected error: {}",
         error
     );
@@ -211,7 +214,8 @@ async fn test_protocol_change_from_plaintext_to_encrypted_on_encrypted_server() 
 async fn test_protocol_change_from_encrypted_to_plaintext_on_plaintext_server() {
     let api = EspHomeApi::builder()
         .name(TEST_DEVICE_NAME.to_string())
-        .build();
+        .build()
+        .unwrap();
 
     let (client_stream, server_stream) = duplex(1024);
     let (mut _client_read, mut client_write) = tokio::io::split(client_stream);
@@ -236,9 +240,7 @@ async fn test_protocol_change_from_encrypted_to_plaintext_on_plaintext_server() 
     let (start_result, _) = tokio::join!(start_future, write_future);
     let error = start_result.expect_err("encrypted connection should be rejected");
     assert!(
-        error
-            .to_string()
-            .contains("No encryption key set, but encrypted communication requested"),
+        error.to_string().contains("encryption protocol mismatch"),
         "unexpected error: {}",
         error
     );

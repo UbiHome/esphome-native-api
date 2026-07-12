@@ -110,13 +110,11 @@ pub enum HandshakeError {
     #[error("invalid marker byte {0}")]
     InvalidMarker(u8),
 
-    /// The device is configured for encryption but the peer spoke plaintext.
-    #[error("Only key encryption is enabled")]
-    OnlyEncryptedAllowed,
-
-    /// The peer requested encryption but no encryption key is configured.
-    #[error("No encryption key set, but encrypted communication requested.")]
-    EncryptionNotAllowed,
+    /// The peer and this device disagree on transport encryption: one side
+    /// offered plaintext while the other requires (or forbids) an encrypted
+    /// connection. The contained string describes which side mismatched.
+    #[error("encryption protocol mismatch: {0}")]
+    EncryptionProtocolMismatch(&'static str),
 
     /// The noise handshake failed its MAC check (wrong encryption key).
     #[error("Handshake MAC failure")]
