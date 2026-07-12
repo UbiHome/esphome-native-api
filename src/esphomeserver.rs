@@ -25,8 +25,11 @@
 //!     });
 //!     server.add_entity("door_sensor", sensor);
 //!     
-//!     let (tx, mut rx) = server.start(stream).await?;
-//!     
+//!     let connection = server.start(stream).await?;
+//!     let tx = connection.sender();
+//!     let mut rx = connection.incoming();
+//!     # let _ = (tx, &mut rx);
+//!
 //!     Ok(())
 //! }
 //! ```
@@ -34,7 +37,6 @@
 #![allow(dead_code)]
 
 use log::debug;
-use log::error;
 use noise_protocol::CipherState;
 use noise_protocol::HandshakeState;
 use noise_rust_crypto::ChaCha20Poly1305;
@@ -47,9 +49,10 @@ use std::sync::atomic::AtomicBool;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
-use tokio::sync::mpsc;
 use typed_builder::TypedBuilder;
 
+use crate::connection::Connection;
+use crate::error::Error;
 use crate::esphomeapi::EspHomeApi;
 use crate::parser::ProtoMessage;
 use crate::proto::ListEntitiesDoneResponse;
@@ -164,20 +167,14 @@ impl EspHomeServer {
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let stream = TcpStream::connect("192.168.1.100:6053").await?;
     /// let mut server = EspHomeServer::builder().name("client".to_string()).build();
-    /// let (tx, mut rx) = server.start(stream).await?;
+    /// let connection = server.start(stream).await?;
+    /// let tx = connection.sender();
+    /// let mut rx = connection.incoming();
+    /// # let _ = (tx, &mut rx);
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn start(
-        &mut self,
-        tcp_stream: TcpStream,
-    ) -> Result<
-        (
-            mpsc::Sender<ProtoMessage>,
-            broadcast::Receiver<ProtoMessage>,
-        ),
-        Box<dyn std::error::Error>,
-    > {
+    pub async fn start(&mut self, tcp_stream: TcpStream) -> Result<Connection, Error> {
         let server = EspHomeApi::builder()
             .api_version_major(self.api_version_major)
             .api_version_minor(self.api_version_minor)
@@ -191,49 +188,51 @@ impl EspHomeServer {
             // .model(self.model)
             // .suggested_area(self.suggested_area)
             .build();
-        let (messages_tx, mut messages_rx) = server.start(tcp_stream).await?;
+        let api_connection = server.start(tcp_stream).await?;
+        let messages_tx = api_connection.sender();
+        let mut messages_rx = api_connection.incoming();
         let (outgoing_messages_tx, outgoing_messages_rx) = broadcast::channel::<ProtoMessage>(16);
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel::<Result<(), Error>>();
         let api_components_clone = self.components_by_key.clone();
-        // let messages_tx_clone = messages_tx.clone();
 
         tokio::spawn(async move {
             loop {
-                messages_rx.recv().await.map_or_else(
-                    |e| {
-                        error!("Error receiving message: {:?}", e);
-                        // Handle the error, maybe log it or break the loop
-                    },
-                    |message| {
-                        // Process the received message
-                        debug!("Received message: {:?}", message);
+                let message = match messages_rx.recv().await {
+                    Ok(message) => message,
+                    Err(_) => {
+                        // The underlying connection closed; stop routing.
+                        break;
+                    }
+                };
+                // Process the received message
+                debug!("Received message: {:?}", message);
 
-                        match message {
-                            ProtoMessage::ListEntitiesRequest(list_entities_request) => {
-                                debug!("ListEntitiesRequest: {:?}", list_entities_request);
+                match message {
+                    ProtoMessage::ListEntitiesRequest(list_entities_request) => {
+                        debug!("ListEntitiesRequest: {:?}", list_entities_request);
 
-                                for _sensor in api_components_clone.values() {
-                                    // TODO: Handle the different entity types
-                                    // outgoing_messages_tx.send(sensor.clone()).unwrap();
-                                }
-                                outgoing_messages_tx
-                                    .send(ProtoMessage::ListEntitiesDoneResponse(
-                                        ListEntitiesDoneResponse {},
-                                    ))
-                                    .unwrap();
-                            }
-                            other_message => {
-                                // Forward the message to the outgoing channel
-                                if let Err(e) = outgoing_messages_tx.send(other_message) {
-                                    error!("Error sending message to outgoing channel: {:?}", e);
-                                }
-                            }
+                        for _sensor in api_components_clone.values() {
+                            // TODO: Handle the different entity types
+                            // let _ = outgoing_messages_tx.send(sensor.clone());
                         }
-                    },
-                );
+                        // No active receivers is fine (consumer dropped its handle).
+                        let _ = outgoing_messages_tx.send(ProtoMessage::ListEntitiesDoneResponse(
+                            ListEntitiesDoneResponse {},
+                        ));
+                    }
+                    other_message => {
+                        // Forward the message to the outgoing channel; ignore the
+                        // error when there are no receivers.
+                        let _ = outgoing_messages_tx.send(other_message);
+                    }
+                }
             }
+
+            // Propagate the underlying connection's terminal outcome.
+            let _ = done_tx.send(api_connection.wait().await);
         });
 
-        Ok((messages_tx.clone(), outgoing_messages_rx))
+        Ok(Connection::new(messages_tx, outgoing_messages_rx, done_rx))
     }
 
     /// Adds an entity to the server's internal registry.

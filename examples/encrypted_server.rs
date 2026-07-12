@@ -137,7 +137,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }),
                 ];
 
-                let (tx, mut rx) = server.start(stream).await.expect("Failed to start server");
+                let connection = server
+                    .start(stream)
+                    .await
+                    .expect("Failed to start server");
+                let tx = connection.sender();
+                let mut rx = connection.incoming();
                 let tx_clone = tx.clone();
                 debug!("Server started");
 

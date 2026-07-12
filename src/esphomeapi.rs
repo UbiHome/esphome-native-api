@@ -20,7 +20,10 @@
 //!         .name("my-client".to_string())
 //!         .build();
 //!     
-//!     let (tx, mut rx) = api.start(stream).await?;
+//!     let connection = api.start(stream).await?;
+//!     let tx = connection.sender();
+//!     let mut rx = connection.incoming();
+//!     # let _ = (tx, &mut rx);
 //!     Ok(())
 //! }
 //! ```
@@ -40,7 +43,10 @@
 //!         .encryption_key("your-base64-encoded-key".to_string())
 //!         .build();
 //!     
-//!     let (tx, mut rx) = api.start(stream).await?;
+//!     let connection = api.start(stream).await?;
+//!     let tx = connection.sender();
+//!     let mut rx = connection.incoming();
+//!     # let _ = (tx, &mut rx);
 //!     Ok(())
 //! }
 //! ```
@@ -69,6 +75,7 @@ use tokio_util::codec::FramedRead;
 use tokio_util::codec::FramedWrite;
 use typed_builder::TypedBuilder;
 
+use crate::connection::Connection;
 use crate::error::{DisconnectReason, Error, FrameError, HandshakeError};
 use crate::frame::FrameCodec;
 use crate::packet_encrypted;
@@ -245,17 +252,18 @@ impl EspHomeApi {
     ///
     /// # Returns
     ///
-    /// Returns a tuple containing:
-    /// - An `mpsc::Sender` for sending messages to the device
-    /// - A `broadcast::Receiver` for receiving messages from the device
+    /// Returns a [`Connection`] handle. Use [`Connection::sender`] to send
+    /// messages to the device, [`Connection::incoming`] to receive messages from
+    /// it, and [`Connection::wait`] to observe when — and why — the connection
+    /// ends.
     ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - The connection fails
-    /// - The encryption handshake fails
-    /// - The hello exchange fails
+    /// Returns an [`Error`] if:
+    /// - The connection fails ([`Error::Io`])
+    /// - The encryption handshake fails ([`Error::Handshake`])
     /// - The device requires encryption but no key was provided
+    /// - The peer disconnects mid-handshake ([`Error::Disconnected`])
     ///
     /// # Examples
     ///
@@ -264,21 +272,15 @@ impl EspHomeApi {
     /// # use tokio::net::TcpStream;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let stream = TcpStream::connect("192.168.1.100:6053").await?;
-    /// let mut api = EspHomeApi::builder().name("client".to_string()).build();
-    /// let (tx, mut rx) = api.start(stream).await?;
+    /// let api = EspHomeApi::builder().name("client".to_string()).build();
+    /// let connection = api.start(stream).await?;
+    /// let tx = connection.sender();
+    /// let mut rx = connection.incoming();
+    /// # let _ = (tx, &mut rx);
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn start<S>(
-        &self,
-        stream: S,
-    ) -> Result<
-        (
-            mpsc::Sender<ProtoMessage>,
-            broadcast::Receiver<ProtoMessage>,
-        ),
-        Box<dyn std::error::Error>,
-    >
+    pub async fn start<S>(&self, stream: S) -> Result<Connection, Error>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
@@ -454,6 +456,9 @@ impl EspHomeApi {
 
         // Asynchronously wait for an inbound socket.
         let (cancellation_write_tx, mut cancellation_write_rx) = oneshot::channel();
+
+        // Reports the read loop's terminal outcome to `Connection::wait`.
+        let (done_tx, done_rx) = oneshot::channel::<Result<(), Error>>();
 
         // Write Loop
         let encrypt_cypher_for_write = encrypt_cypher;
@@ -637,8 +642,14 @@ impl EspHomeApi {
             }
             // If sending fails, the write loop is probably already closed.
             let _ = cancellation_write_tx.send("read loop finished");
+            // Report the terminal outcome to the consumer (ignored if dropped).
+            let _ = done_tx.send(outcome);
         });
 
-        Ok((answer_messages_tx.clone(), outgoing_messages_rx))
+        Ok(Connection::new(
+            answer_messages_tx,
+            outgoing_messages_rx,
+            done_rx,
+        ))
     }
 }

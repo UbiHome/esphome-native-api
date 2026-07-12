@@ -40,7 +40,7 @@ pub enum Error {
 
     /// An unexpected I/O error that is not a normal disconnect.
     #[error("io error: {0}")]
-    Io(#[source] io::Error),
+    Io(#[from] io::Error),
 }
 
 /// Why a connection ended.

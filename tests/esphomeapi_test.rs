@@ -100,7 +100,7 @@ async fn test_hello_message_and_response_plaintext() {
     };
 
     let (start_result, _) = tokio::join!(start_future, write_future);
-    let (_tx, _outgoing_messages_rx) = start_result.expect("server start failed");
+    let _connection = start_result.expect("server start failed");
 
     let mut response_frame = vec![0u8; plaintext_hello_response_frame().len()];
     tokio::time::timeout(
@@ -173,7 +173,7 @@ async fn test_protocol_change_from_plaintext_to_encrypted_on_encrypted_server() 
     };
 
     let (start_result, _) = tokio::join!(start_future, write_future);
-    let (_tx, _outgoing_messages_rx) = start_result.expect("encrypted connection should succeed");
+    let _connection = start_result.expect("encrypted connection should succeed");
 
     // Read and validate server's handshake response
     let mut handshake_response = vec![0u8; encrypted_server_handshake_frame().len()];
@@ -259,7 +259,7 @@ async fn test_protocol_change_from_encrypted_to_plaintext_on_plaintext_server() 
     };
 
     let (start_result, _) = tokio::join!(start_future, write_future);
-    let (_tx, _outgoing_messages_rx) = start_result.expect("plaintext connection should succeed");
+    let _connection = start_result.expect("plaintext connection should succeed");
 
     let mut response_frame = vec![0u8; plaintext_hello_response_frame().len()];
     tokio::time::timeout(
