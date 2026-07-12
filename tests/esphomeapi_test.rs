@@ -1,9 +1,12 @@
 use esphome_native_api::esphomeapi::EspHomeApi;
+use esphome_native_api::{DisconnectReason, Error, FrameError, HandshakeError};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 
 const TEST_DEVICE_NAME: &str = "test_device";
 const NOISE_PSK: &str = "xiahAckHBW7BcKEQ6mRfasIW20Md9uMh/5PjrjbAhXQ=";
+// A valid 32-byte base64 key that does not match the fixture frames.
+const WRONG_NOISE_PSK: &str = "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=";
 
 fn plaintext_hello_request_frame() -> Vec<u8> {
     vec![
@@ -271,6 +274,306 @@ async fn test_protocol_change_from_encrypted_to_plaintext_on_plaintext_server() 
     .await
     .expect("timed out waiting for plaintext response")
     .expect("failed to read plaintext response frame");
+
+    assert_eq!(response_frame, plaintext_hello_response_frame());
+}
+
+#[test]
+fn test_build_rejects_invalid_base64_encryption_key() {
+    let error = match EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .encryption_key("not valid base64!!!".to_string())
+        .build()
+    {
+        Ok(_) => panic!("invalid key should fail at build time"),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(error, Error::Config(_)),
+        "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn test_start_fails_with_no_data_when_peer_closes_immediately() {
+    let (client_stream, server_stream) = duplex(1024);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .build()
+        .unwrap();
+
+    drop(client_stream);
+    let error = api
+        .start(server_stream)
+        .await
+        .expect_err("closed connection without data should be rejected");
+    assert!(
+        matches!(error, Error::Handshake(HandshakeError::NoData)),
+        "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn test_start_fails_with_invalid_marker_byte() {
+    let (client_stream, server_stream) = duplex(1024);
+    let (_client_read, mut client_write) = tokio::io::split(client_stream);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .build()
+        .unwrap();
+
+    let start_future = api.start(server_stream);
+    let write_future = async {
+        client_write
+            .write_all(&[0x42])
+            .await
+            .expect("failed to write marker byte");
+        client_write.flush().await.expect("failed to flush");
+    };
+
+    let (start_result, _) = tokio::join!(start_future, write_future);
+    let error = start_result.expect_err("invalid marker byte should be rejected");
+    assert!(
+        matches!(error, Error::Handshake(HandshakeError::InvalidMarker(0x42))),
+        "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn test_start_fails_with_mac_failure_on_wrong_key() {
+    let (client_stream, server_stream) = duplex(1024);
+    let (_client_read, mut client_write) = tokio::io::split(client_stream);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .encryption_key(WRONG_NOISE_PSK.to_string())
+        .build()
+        .unwrap();
+
+    let start_future = api.start(server_stream);
+    let write_future = async {
+        client_write
+            .write_all(&encrypted_client_hello_frame())
+            .await
+            .expect("failed to write encrypted hello frame");
+        client_write
+            .write_all(&encrypted_client_handshake_frame())
+            .await
+            .expect("failed to write encrypted handshake frame");
+        client_write.flush().await.expect("failed to flush");
+    };
+
+    let (start_result, _) = tokio::join!(start_future, write_future);
+    let error = start_result.expect_err("handshake with mismatched key should be rejected");
+    assert!(
+        matches!(error, Error::Handshake(HandshakeError::MacFailure)),
+        "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn test_start_fails_with_aborted_when_peer_leaves_mid_handshake() {
+    let (client_stream, server_stream) = duplex(1024);
+    let (_client_read, mut client_write) = tokio::io::split(client_stream);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .encryption_key(NOISE_PSK.to_string())
+        .build()
+        .unwrap();
+
+    let start_future = api.start(server_stream);
+    let write_future = async {
+        client_write
+            .write_all(&encrypted_client_hello_frame())
+            .await
+            .expect("failed to write encrypted hello frame");
+        client_write
+            .shutdown()
+            .await
+            .expect("failed to shutdown client");
+    };
+
+    let (start_result, _) = tokio::join!(start_future, write_future);
+    let error = start_result.expect_err("mid-handshake disconnect should be rejected");
+    assert!(
+        matches!(error, Error::Handshake(HandshakeError::Aborted)),
+        "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn test_wait_reports_eof_when_peer_closes() {
+    let (mut client_stream, server_stream) = duplex(1024);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .build()
+        .unwrap();
+
+    let start_future = api.start(server_stream);
+    let write_future = async {
+        client_stream
+            .write_all(&plaintext_hello_request_frame())
+            .await
+            .expect("failed to write request frame");
+        client_stream.flush().await.expect("failed to flush");
+    };
+
+    let (start_result, _) = tokio::join!(start_future, write_future);
+    let connection = start_result.expect("server start failed");
+
+    let mut response_frame = vec![0u8; plaintext_hello_response_frame().len()];
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        client_stream.read_exact(&mut response_frame),
+    )
+    .await
+    .expect("timed out waiting for response")
+    .expect("failed to read response frame");
+
+    client_stream
+        .shutdown()
+        .await
+        .expect("failed to shutdown client");
+
+    let outcome = tokio::time::timeout(Duration::from_secs(1), connection.wait())
+        .await
+        .expect("timed out waiting for connection to end");
+    assert!(
+        matches!(outcome, Err(Error::Disconnected(DisconnectReason::Eof))),
+        "unexpected outcome: {outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_wait_reports_requested_after_disconnect_request() {
+    let (mut client_stream, server_stream) = duplex(1024);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .build()
+        .unwrap();
+
+    // DisconnectRequest: plaintext preamble, empty payload, message type 5
+    let disconnect_request_frame = [0x00, 0x00, 0x05];
+
+    let start_future = api.start(server_stream);
+    let write_future = async {
+        client_stream
+            .write_all(&disconnect_request_frame)
+            .await
+            .expect("failed to write disconnect request frame");
+        client_stream.flush().await.expect("failed to flush");
+    };
+
+    let (start_result, _) = tokio::join!(start_future, write_future);
+    let connection = start_result.expect("server start failed");
+
+    // DisconnectResponse: plaintext preamble, empty payload, message type 6
+    let mut response_frame = [0u8; 3];
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        client_stream.read_exact(&mut response_frame),
+    )
+    .await
+    .expect("timed out waiting for disconnect response")
+    .expect("failed to read disconnect response frame");
+    assert_eq!(response_frame, [0x00, 0x00, 0x06]);
+
+    client_stream
+        .shutdown()
+        .await
+        .expect("failed to shutdown client");
+
+    let outcome = tokio::time::timeout(Duration::from_secs(1), connection.wait())
+        .await
+        .expect("timed out waiting for connection to end");
+    assert!(
+        matches!(
+            outcome,
+            Err(Error::Disconnected(DisconnectReason::Requested))
+        ),
+        "unexpected outcome: {outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_wait_reports_frame_error_on_undecodable_message() {
+    let (mut client_stream, server_stream) = duplex(1024);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .build()
+        .unwrap();
+
+    // HelloRequest (type 1) whose payload is not valid protobuf: 0xFF starts a
+    // varint tag with no continuation byte.
+    let bad_frame = [0x00, 0x01, 0x01, 0xFF];
+
+    let start_future = api.start(server_stream);
+    let write_future = async {
+        client_stream
+            .write_all(&bad_frame)
+            .await
+            .expect("failed to write bad frame");
+        client_stream.flush().await.expect("failed to flush");
+    };
+
+    let (start_result, _) = tokio::join!(start_future, write_future);
+    let connection = start_result.expect("server start failed");
+
+    let outcome = tokio::time::timeout(Duration::from_secs(1), connection.wait())
+        .await
+        .expect("timed out waiting for connection to end");
+    assert!(
+        matches!(
+            outcome,
+            Err(Error::Frame(FrameError::Decode { message_type: 1 }))
+        ),
+        "unexpected outcome: {outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_unknown_message_type_is_skipped() {
+    let (mut client_stream, server_stream) = duplex(1024);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .build()
+        .unwrap();
+
+    // Message type 127 is not assigned; the frame must be skipped and the
+    // following HelloRequest still answered.
+    let unknown_type_frame = [0x00, 0x00, 0x7F];
+
+    let start_future = api.start(server_stream);
+    let write_future = async {
+        client_stream
+            .write_all(&unknown_type_frame)
+            .await
+            .expect("failed to write unknown type frame");
+        client_stream
+            .write_all(&plaintext_hello_request_frame())
+            .await
+            .expect("failed to write request frame");
+        client_stream.flush().await.expect("failed to flush");
+    };
+
+    let (start_result, _) = tokio::join!(start_future, write_future);
+    let _connection = start_result.expect("server start failed");
+
+    let mut response_frame = vec![0u8; plaintext_hello_response_frame().len()];
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        client_stream.read_exact(&mut response_frame),
+    )
+    .await
+    .expect("timed out waiting for response")
+    .expect("failed to read response frame");
 
     assert_eq!(response_frame, plaintext_hello_response_frame());
 }
