@@ -18,6 +18,7 @@ use thiserror::Error;
 
 /// Top-level error returned by the ESPHome native API.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     /// The connection ended. This is an expected lifecycle event, not
     /// necessarily a failure — inspect the [`DisconnectReason`] to decide.
@@ -49,6 +50,7 @@ pub enum Error {
 /// away; they are kept distinct so a consumer can log or react differently (for
 /// example, treating [`DisconnectReason::Requested`] as fully graceful).
 #[derive(Debug, Clone, Error)]
+#[non_exhaustive]
 pub enum DisconnectReason {
     /// The stream reached end of file (the peer closed its side cleanly).
     #[error("end of stream")]
@@ -67,6 +69,7 @@ pub enum DisconnectReason {
 
 /// A frame arrived but could not be decoded into a [`crate::parser::ProtoMessage`].
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum FrameError {
     /// A well-formed frame carrying a message type this build does not know.
     ///
@@ -96,6 +99,7 @@ pub enum FrameError {
 /// Failures while establishing a connection or performing the encryption
 /// handshake. All of these are returned before the read/write loops start.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum HandshakeError {
     /// No bytes were received on a freshly accepted connection (for example, a
     /// port probe that connects and immediately closes).
