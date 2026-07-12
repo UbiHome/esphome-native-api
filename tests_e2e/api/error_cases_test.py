@@ -1,5 +1,8 @@
 """Error-path tests: misconfigured or misbehaving clients must be rejected
-cleanly, and the server must keep serving well-behaved clients afterwards."""
+cleanly, and the server must keep serving well-behaved clients afterwards.
+
+The encrypted-server rejection cases (wrong key, plaintext client) are already
+covered in encrypted_server_test.py."""
 
 import asyncio
 
@@ -19,26 +22,6 @@ async def assert_connect_ok(server: EspHomeTestServer, noise_psk: str | None = N
     device_info = await api.device_info()
     assert device_info.name == "test_device"
     await api.disconnect()
-
-
-async def test_wrong_encryption_key_is_rejected(encrypted_server: EspHomeTestServer):
-    api = aioesphomeapi.APIClient(
-        "127.0.0.1", encrypted_server.port, "", noise_psk=WRONG_NOISE_PSK
-    )
-    with pytest.raises(aioesphomeapi.InvalidEncryptionKeyAPIError):
-        await api.connect(login=False)
-
-    await assert_connect_ok(encrypted_server, noise_psk=encrypted_server.noise_psk)
-
-
-async def test_plaintext_client_is_rejected_by_encrypted_server(
-    encrypted_server: EspHomeTestServer,
-):
-    api = aioesphomeapi.APIClient("127.0.0.1", encrypted_server.port, "")
-    with pytest.raises(aioesphomeapi.RequiresEncryptionAPIError):
-        await api.connect(login=False)
-
-    await assert_connect_ok(encrypted_server, noise_psk=encrypted_server.noise_psk)
 
 
 async def test_encrypted_client_is_rejected_by_plaintext_server(
