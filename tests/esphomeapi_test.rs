@@ -577,3 +577,172 @@ async fn test_unknown_message_type_is_skipped() {
 
     assert_eq!(response_frame, plaintext_hello_response_frame());
 }
+
+// A well-framed encrypted frame whose ciphertext is garbage, so AEAD
+// decryption must fail.
+fn encrypted_garbage_frame() -> Vec<u8> {
+    let mut frame = vec![0x01, 0x00, 0x10];
+    frame.extend([0u8; 16]);
+    frame
+}
+
+#[tokio::test]
+async fn test_wait_reports_decrypt_error_on_garbage_ciphertext() {
+    let (client_stream, server_stream) = duplex(1024);
+    let (_client_read, mut client_write) = tokio::io::split(client_stream);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .encryption_key(NOISE_PSK.to_string())
+        .build()
+        .unwrap();
+
+    let start_future = api.start(server_stream);
+    let write_future = async {
+        client_write
+            .write_all(&encrypted_client_hello_frame())
+            .await
+            .expect("failed to write encrypted hello frame");
+        client_write
+            .write_all(&encrypted_client_handshake_frame())
+            .await
+            .expect("failed to write encrypted handshake frame");
+        client_write
+            .write_all(&encrypted_client_encrypted_hello_frame())
+            .await
+            .expect("failed to write encrypted hello request frame");
+        client_write
+            .write_all(&encrypted_garbage_frame())
+            .await
+            .expect("failed to write garbage frame");
+        client_write.flush().await.expect("failed to flush");
+    };
+
+    let (start_result, _) = tokio::join!(start_future, write_future);
+    let connection = start_result.expect("encrypted connection should succeed");
+
+    let outcome = tokio::time::timeout(Duration::from_secs(1), connection.wait())
+        .await
+        .expect("timed out waiting for connection to end");
+    assert!(
+        matches!(outcome, Err(Error::Frame(FrameError::Decrypt))),
+        "unexpected outcome: {outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_wait_reports_reset_when_peer_resets_connection() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("failed to bind listener");
+    let addr = listener.local_addr().expect("failed to get local addr");
+    let mut client = tokio::net::TcpStream::connect(addr)
+        .await
+        .expect("failed to connect");
+    let (server_stream, _) = listener.accept().await.expect("failed to accept");
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .build()
+        .unwrap();
+
+    client
+        .write_all(&plaintext_hello_request_frame())
+        .await
+        .expect("failed to write request frame");
+    let connection = api.start(server_stream).await.expect("server start failed");
+
+    let mut response_frame = vec![0u8; plaintext_hello_response_frame().len()];
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        client.read_exact(&mut response_frame),
+    )
+    .await
+    .expect("timed out waiting for response")
+    .expect("failed to read response frame");
+
+    // Linger 0 makes the close send an RST instead of a FIN.
+    client
+        .set_linger(Some(Duration::from_secs(0)))
+        .expect("failed to set linger");
+    drop(client);
+
+    let outcome = tokio::time::timeout(Duration::from_secs(1), connection.wait())
+        .await
+        .expect("timed out waiting for connection to end");
+    assert!(
+        matches!(
+            outcome,
+            Err(Error::Disconnected(DisconnectReason::Reset(_)))
+        ),
+        "unexpected outcome: {outcome:?}"
+    );
+}
+
+/// A stream that serves one scripted read and panics on the next one, killing
+/// the connection's read-loop task before it can report an outcome.
+struct PanicOnSecondRead {
+    first_read: Option<Vec<u8>>,
+}
+
+impl tokio::io::AsyncRead for PanicOnSecondRead {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.first_read.take() {
+            Some(bytes) => {
+                buf.put_slice(&bytes);
+                std::task::Poll::Ready(Ok(()))
+            }
+            None => panic!("simulated crash in the connection task"),
+        }
+    }
+}
+
+impl tokio::io::AsyncWrite for PanicOnSecondRead {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<Result<usize, std::io::Error>> {
+        std::task::Poll::Ready(Ok(buf.len()))
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
+#[tokio::test]
+async fn test_wait_reports_task_failed_when_connection_task_panics() {
+    let stream = PanicOnSecondRead {
+        first_read: Some(plaintext_hello_request_frame()),
+    };
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .build()
+        .unwrap();
+
+    let connection = api.start(stream).await.expect("server start failed");
+
+    let outcome = tokio::time::timeout(Duration::from_secs(1), connection.wait())
+        .await
+        .expect("timed out waiting for connection to end");
+    assert!(
+        matches!(outcome, Err(Error::TaskFailed)),
+        "unexpected outcome: {outcome:?}"
+    );
+}
