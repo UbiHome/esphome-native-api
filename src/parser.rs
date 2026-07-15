@@ -56,14 +56,14 @@ macro_rules! proto_message_mappings {
         }
 
         #[doc(hidden)]
-        pub fn parse_proto_message(message_type: usize, buf: &[u8]) -> Result<ProtoMessage, &'static str> {
+        pub fn parse_proto_message(message_type: usize, buf: &[u8]) -> Result<ProtoMessage, crate::error::FrameError> {
             match message_type {
                 $(
                     $type_id => $struct::decode(buf)
                         .map(ProtoMessage::$struct)
-                        .map_err(|_| concat!("Failed to decode ", stringify!($struct))),
+                        .map_err(|_| crate::error::FrameError::Decode { message_type: message_type as u16 }),
                 )*
-                _ => Err(Box::leak(format!("Unknown message type: {}", message_type).into_boxed_str())),
+                _ => Err(crate::error::FrameError::UnknownMessageType(message_type as u16)),
             }
         }
 

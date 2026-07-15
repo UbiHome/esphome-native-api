@@ -48,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .model("Test Model".to_string())
         .suggested_area("Test Area".to_string())
         .encryption_key("px7tsbK3C7bpXHr2OevEV2ZMg/FrNBw2+O2pNPbedtA=".to_string())
-        .build();
+        .build()?;
 
     let main_server = async {
         loop {
@@ -137,7 +137,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }),
                 ];
 
-                let (tx, mut rx) = server.start(stream).await.expect("Failed to start server");
+                let connection = server.start(stream).await.expect("Failed to start server");
+                let tx = connection.sender();
+                let mut rx = connection.receiver();
                 let tx_clone = tx.clone();
                 debug!("Server started");
 

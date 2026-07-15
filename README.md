@@ -46,10 +46,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create API instance
     let mut api = EspHomeApi::builder()
         .name("my-client".to_string())
-        .build();
+        .build()?;
     
     // Start communication
-    let (tx, mut rx) = api.start(stream).await?;
+    let connection = api.start(stream).await?;
+    let tx = connection.sender();
+    let mut rx = connection.receiver();
     
     // Process messages
     while let Ok(message) = rx.recv().await {
@@ -75,7 +77,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .name("my-server".to_string())
         .build();
     
-    let (tx, mut rx) = server.start(stream).await?;
+    let connection = server.start(stream).await?;
+    let tx = connection.sender();
+    let mut rx = connection.receiver();
     
     // Handle incoming messages
     while let Ok(message) = rx.recv().await {
