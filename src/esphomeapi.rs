@@ -15,11 +15,11 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let stream = TcpStream::connect("192.168.1.100:6053").await?;
-//!     
+//!
 //!     let mut api = EspHomeApi::builder()
 //!         .name("my-client".to_string())
 //!         .build()?;
-//!     
+//!
 //!     let connection = api.start(stream).await?;
 //!     let tx = connection.sender();
 //!     let mut rx = connection.receiver();
@@ -37,12 +37,12 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let stream = TcpStream::connect("192.168.1.100:6053").await?;
-//!     
+//!
 //!     let mut api = EspHomeApi::builder()
 //!         .name("my-client".to_string())
 //!         .encryption_key("your-base64-encoded-key".to_string())
 //!         .build()?;
-//!     
+//!
 //!     let connection = api.start(stream).await?;
 //!     let tx = connection.sender();
 //!     let mut rx = connection.receiver();
@@ -346,6 +346,8 @@ impl EspHomeApi {
             zwave_proxy_feature_flags: 0,
             zwave_home_id: 0,
             serial_proxies: vec![],
+            api_encryption_provisionable: false,
+            api_outgoing_connection_supported: false,
         };
 
         let hello_response = HelloResponse {

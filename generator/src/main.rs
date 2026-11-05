@@ -5,7 +5,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{Seek, Write};
 use std::path::Path;
 
-const CURRENT_VERSION: &str = "2026.6.2";
+const CURRENT_VERSION: &str = "2026.10.2";
 const LAST_SUPPLIED_VERSION: &str = "2025.2.1";
 
 fn get_package_name(version: &str) -> String {
@@ -148,7 +148,11 @@ async fn main() {
         .unwrap();
     writeln!(file, "[features]").unwrap();
     let default_package_name = get_package_name(CURRENT_VERSION);
-    writeln!(file, "default = [\"std\", \"{}\"]", default_package_name).unwrap();
+    writeln!(
+      file,
+      "default = [\"std\", \"{}\"] # To change the default version, update `CURRENT_VERSION` in `generator/src/main.rs`.",
+      default_package_name
+    ).unwrap();
     writeln!(file, "std = []").unwrap();
 
     for version in versions {

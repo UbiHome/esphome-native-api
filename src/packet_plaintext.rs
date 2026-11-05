@@ -57,6 +57,7 @@ mod tests {
             api_version_major: 1,
             api_version_minor: 10,
             client_info: "aioesphomeapi".to_string(),
+            outgoing_connection_target: false,
         });
         let bytes = message_to_packet(&message).unwrap();
 
