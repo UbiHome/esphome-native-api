@@ -1,228 +1,268 @@
-use byteorder::BigEndian;
-use byteorder::ByteOrder;
-use log::debug;
+//! Framing of the ESPHome native API byte stream.
+//!
+//! A frame starts with a preamble byte (`0` plaintext, `1` encrypted) followed
+//! by the payload length (a varint for plaintext, a big endian `u16` for
+//! encrypted frames) and the payload itself. This module is pure: it works on
+//! byte slices and performs no I/O.
+
+use alloc::format;
+use alloc::string::ToString;
+use alloc::vec::Vec;
+
 use log::trace;
-use prost::decode_length_delimiter;
-use prost::encode_length_delimiter;
 
-use bytes::{Buf, BytesMut};
-use tokio_util::codec::Decoder;
-use tokio_util::codec::Encoder;
+use crate::error::FrameError;
 
+/// Largest frame accepted or produced unless configured otherwise.
+pub(crate) const DEFAULT_MAX_FRAME_LENGTH: usize = 8 * 1024 * 1024;
+
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct FrameCodec {
     encrypted: bool,
     max_length: usize,
 }
 
 impl FrameCodec {
+    #[cfg(test)]
     pub fn new(encrypted: bool) -> Self {
+        Self::with_max_length(encrypted, DEFAULT_MAX_FRAME_LENGTH)
+    }
+
+    pub fn with_max_length(encrypted: bool, max_length: usize) -> Self {
         FrameCodec {
             encrypted,
-            max_length: 8 * 1024 * 1024,
+            max_length,
         }
     }
-}
 
-impl Decoder for FrameCodec {
-    type Item = Vec<u8>;
-    type Error = std::io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        // Check if var uint is completely read
-
-        if src.is_empty() {
-            // Not enough data t0o read length marker.
+    /// Try to split one frame off the front of `src`.
+    ///
+    /// Returns `Ok(None)` when `src` does not hold a complete frame yet.
+    /// Otherwise returns the frame's payload together with the total number of
+    /// bytes the frame occupies in `src` (header included), which the caller
+    /// has to discard before decoding the next frame.
+    pub fn decode<'a>(&self, src: &'a [u8]) -> Result<Option<(&'a [u8], usize)>, FrameError> {
+        let Some(&preamble) = src.first() else {
+            // Not enough data to read the preamble.
             return Ok(None);
-        }
+        };
 
-        // Check encryption byte
-        let mut varint_length = 1;
+        let header_length: usize;
         let length: usize;
         if self.encrypted {
-            if src[0] != 1 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Expected encrypted frame, but got plaintext frame.",
+            if preamble != 1 {
+                return Err(FrameError::Malformed(
+                    "Expected encrypted frame, but got plaintext frame.".to_string(),
                 ));
             }
-            varint_length = 2;
-            if src.len() < varint_length + 1 {
+            header_length = 3;
+            if src.len() < header_length {
                 // Not enough data to read length marker.
                 return Ok(None);
             }
-            trace!("length bytes: {:?}", &src[1..3]);
-            length = BigEndian::read_u16(&src[1..3]) as usize;
+            length = u16::from_be_bytes([src[1], src[2]]) as usize;
         } else {
-            if src[0] != 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Expected plaintext frame, but got encrypted frame.",
+            if preamble != 0 {
+                return Err(FrameError::Malformed(
+                    "Expected plaintext frame, but got encrypted frame.".to_string(),
                 ));
             }
+            // Read the varint length marker (at most 4 bytes).
+            let mut cursor = 1;
+            let mut value: usize = 0;
             loop {
-                if src.len() < varint_length + 1 {
+                let Some(&byte) = src.get(cursor) else {
                     // Not enough data to read length marker.
                     return Ok(None);
-                }
-                if src[varint_length] & (1 << 7) == 0 {
+                };
+                value |= ((byte & 0x7F) as usize) << (7 * (cursor - 1));
+                if byte & 0x80 == 0 {
                     break;
                 }
-                varint_length += 1;
-                if varint_length > 4 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Varint length marker is too long.",
+                cursor += 1;
+                if cursor > 4 {
+                    return Err(FrameError::Malformed(
+                        "Varint length marker is too long.".to_string(),
                     ));
                 }
             }
-            trace!("Varint cursor at: {}", varint_length);
-            trace!("Varint bytes: {:?}", &src[1..varint_length + 1]);
-            // Read length marker.
-            length = decode_length_delimiter(&src[1..varint_length + 1]).unwrap() as usize + 1; // Add one extra byte for the packet type (which is not included in the frame length).
+            header_length = cursor + 1;
+            // Add one extra byte for the packet type (which is not included in the frame length).
+            length = value + 1;
         }
-        trace!("Frame length: {}", &length);
+        trace!("Frame length: {}", length);
 
-        // Already reserve space when the length is known
-        if src.capacity() < 1 + varint_length + length {
-            // The full string has not yet arrived.
-            //
-            // We reserve more space in the buffer. This is not strictly
-            // necessary, but is a good idea performance-wise.
-            src.reserve(1 + varint_length + length - src.len());
+        if length > self.max_length {
+            return Err(FrameError::Malformed(format!(
+                "Frame of length {} is too large.",
+                length
+            )));
         }
 
-        trace!("Buffer length: {}", src.len());
-
-        if src.len() < 1 + varint_length + length {
-            // The full string has not yet arrived.
+        let frame_length = header_length + length;
+        if src.len() < frame_length {
+            // The full frame has not yet arrived.
             trace!("Not enough data yet.");
             return Ok(None);
         }
 
-        // Get complete data from buffer
-        let data_start = varint_length + 1;
-        let data = src[data_start..data_start + length].to_vec();
-        let new_cursor = 1 + varint_length + length;
-
-        // Use advance to modify src such that it no longer contains this frame.
-        trace!("Advancing cursor to: {}", new_cursor);
-        src.advance(new_cursor);
-
-        debug!("Received frame: {:02X?}", &data);
-        Ok(Some(data))
+        let data = &src[header_length..frame_length];
+        trace!("Received frame: {:02X?}", data);
+        Ok(Some((data, frame_length)))
     }
-}
 
-impl Encoder<Vec<u8>> for FrameCodec {
-    type Error = std::io::Error;
+    /// Append `item` to `dst` as one frame.
+    ///
+    /// For plaintext frames `item` has to start with the message type byte,
+    /// which is not counted in the length marker.
+    pub fn encode(&self, item: &[u8], dst: &mut Vec<u8>) -> Result<(), FrameError> {
+        // Don't send a frame if it is longer than the other end will accept.
+        if item.len() > self.max_length {
+            return Err(FrameError::Malformed(format!(
+                "Frame of length {} is too large.",
+                item.len()
+            )));
+        }
 
-    fn encode(&mut self, item: Vec<u8>, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        // Don't send a string if it is longer than the other end will
-        // accept.
-        let length = if self.encrypted {
-            item.len()
+        if self.encrypted {
+            let length = u16::try_from(item.len()).map_err(|_| {
+                FrameError::Malformed(format!(
+                    "Frame of length {} does not fit into an encrypted frame.",
+                    item.len()
+                ))
+            })?;
+            dst.reserve(3 + item.len());
+            // Encrypted identifier
+            dst.push(1);
+            dst.extend_from_slice(&length.to_be_bytes());
         } else {
             // For plaintext, the length does not include the message type byte
-            item.len() - 1
-        };
-
-        if item.len() > self.max_length {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Frame of length {} is too large.", item.len()),
-            ));
-        }
-
-        let len_slice = if self.encrypted {
-            (length as u16).to_be_bytes().to_vec()
-        } else {
-            let mut length_buffer: Vec<u8> = Vec::new();
-            encode_length_delimiter(length, &mut length_buffer).unwrap();
-            length_buffer
-        };
-
-        // Reserve space in the buffer.
-        dst.reserve(len_slice.len() + item.len()); // Length bytes + string bytes (not length!)
-
-        // Write the length and string to the buffer.
-        if self.encrypted {
-            // Encrypted identifier
-            dst.extend_from_slice(vec![1].as_slice());
-        } else {
+            let mut length = item.len().checked_sub(1).ok_or_else(|| {
+                FrameError::Malformed("Plaintext frame is missing its message type.".to_string())
+            })?;
+            dst.reserve(6 + item.len());
             // Plaintext identifier
-            dst.extend_from_slice(vec![0].as_slice());
+            dst.push(0);
+            // Varint length marker
+            loop {
+                let byte = (length & 0x7F) as u8;
+                length >>= 7;
+                if length == 0 {
+                    dst.push(byte);
+                    break;
+                }
+                dst.push(byte | 0x80);
+            }
         }
 
-        dst.extend_from_slice(&len_slice);
-        dst.extend_from_slice(item.as_slice());
-        debug!("Sending frame: {:02X?}", &dst);
+        dst.extend_from_slice(item);
+        trace!("Sending frame: {:02X?}", dst);
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use futures::sink::SinkExt;
+    use alloc::string::ToString;
+    use alloc::vec;
     use noise_protocol::CipherState;
     use noise_rust_crypto::ChaCha20Poly1305;
-    use std::io::Cursor;
-    use tokio_stream::StreamExt;
 
-    use tokio_util::codec::{FramedRead, FramedWrite};
+    /// Minimal stand-ins for a framed reader / writer, so the tests read like
+    /// the transport code that drives the codec.
+    struct FrameReader {
+        codec: FrameCodec,
+        buffer: Vec<u8>,
+    }
 
-    #[tokio::test]
+    impl FrameReader {
+        fn new(buffer: Vec<u8>, codec: FrameCodec) -> Self {
+            Self { codec, buffer }
+        }
+
+        /// `None` once the buffer holds no further complete frame.
+        fn next(&mut self) -> Option<Result<Vec<u8>, FrameError>> {
+            match self.codec.decode(&self.buffer) {
+                Ok(Some((frame, consumed))) => {
+                    let frame = frame.to_vec();
+                    self.buffer.drain(..consumed);
+                    Some(Ok(frame))
+                }
+                Ok(None) => None,
+                Err(e) => Some(Err(e)),
+            }
+        }
+    }
+
+    struct FrameWriter {
+        codec: FrameCodec,
+        buffer: Vec<u8>,
+    }
+
+    impl FrameWriter {
+        fn new(buffer: Vec<u8>, codec: FrameCodec) -> Self {
+            Self { codec, buffer }
+        }
+
+        fn send(&mut self, item: Vec<u8>) -> Result<(), FrameError> {
+            self.codec.encode(&item, &mut self.buffer)
+        }
+
+        fn get_ref(&self) -> &Vec<u8> {
+            &self.buffer
+        }
+    }
+
     #[test_log::test]
-    async fn decode_frame_size_1() {
+    fn decode_frame_size_1() {
         let message: Vec<u8> = vec![0, 1, 4, 3];
         let decoder = FrameCodec::new(false);
 
-        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+        let mut reader = FrameReader::new(message, decoder);
 
-        let frame1 = reader.next().await.unwrap().unwrap();
+        let frame1 = reader.next().unwrap().unwrap();
 
-        assert!(reader.next().await.is_none());
+        assert!(reader.next().is_none());
         assert_eq!(frame1, vec![4, 3]);
     }
 
-    #[tokio::test]
     #[test_log::test]
-    async fn decode_frame_size_0() {
+    fn decode_frame_size_0() {
         let message: Vec<u8> = vec![0, 0, 1];
         let decoder = FrameCodec::new(false);
 
-        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+        let mut reader = FrameReader::new(message, decoder);
 
-        let frame1 = reader.next().await.unwrap().unwrap();
+        let frame1 = reader.next().unwrap().unwrap();
 
-        assert!(reader.next().await.is_none());
+        assert!(reader.next().is_none());
         assert_eq!(frame1, vec![1]);
     }
 
-    #[tokio::test]
-    async fn decode_frame_encrypted() {
+    #[test]
+    fn decode_frame_encrypted() {
         let message: Vec<u8> = vec![1, 0, 1, 3];
         let decoder = FrameCodec::new(true);
 
-        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+        let mut reader = FrameReader::new(message, decoder);
 
-        let frame1 = reader.next().await.unwrap().unwrap();
+        let frame1 = reader.next().unwrap().unwrap();
 
-        assert!(reader.next().await.is_none());
+        assert!(reader.next().is_none());
         assert_eq!(frame1, vec![3]);
     }
 
-    #[tokio::test]
     #[test_log::test]
-    async fn decode_frame_plaintext() {
+    fn decode_frame_plaintext() {
         let message: Vec<u8> = vec![
             0x00, 0x13, 0x01, 0x0a, 0x0d, 0x61, 0x69, 0x6f, 0x65, 0x73, 0x70, 0x68, 0x6f, 0x6d,
             0x65, 0x61, 0x70, 0x69, 0x10, 0x01, 0x18, 0x0a,
         ];
         let decoder = FrameCodec::new(false);
 
-        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+        let mut reader = FrameReader::new(message, decoder);
 
-        let frame1 = reader.next().await.unwrap().unwrap();
+        let frame1 = reader.next().unwrap().unwrap();
 
         assert_eq!(
             frame1,
@@ -231,76 +271,71 @@ mod tests {
                 0x70, 0x69, 0x10, 0x01, 0x18, 0x0a,
             ]
         );
-        assert!(reader.next().await.is_none());
+        assert!(reader.next().is_none());
     }
 
-    #[tokio::test]
     #[test_log::test]
-    async fn decode_frame_multiple() {
+    fn decode_frame_multiple() {
         let message: Vec<u8> = vec![0, 5, 1, 4, 3, 2, 1, 0, 0, 2, b'a', b'b', b'c'];
         let decoder = FrameCodec::new(false);
 
-        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+        let mut reader = FrameReader::new(message, decoder);
 
-        let frame1 = reader.next().await.unwrap().unwrap();
-        let frame2 = reader.next().await.unwrap().unwrap();
+        let frame1 = reader.next().unwrap().unwrap();
+        let frame2 = reader.next().unwrap().unwrap();
 
-        assert!(reader.next().await.is_none());
+        assert!(reader.next().is_none());
         assert_eq!(frame1, vec![1, 4, 3, 2, 1, 0]);
         assert_eq!(frame2, vec![b'a', b'b', b'c']);
     }
 
-    #[tokio::test]
     #[test_log::test]
-    async fn decode_frame_varint_2() {
+    fn decode_frame_varint_2() {
         let message = [vec![0, 148, 2], vec![0; 277]].concat();
         let decoder = FrameCodec::new(false);
 
-        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+        let mut reader = FrameReader::new(message, decoder);
 
-        let frame1 = reader.next().await.unwrap().unwrap();
+        let frame1 = reader.next().unwrap().unwrap();
 
-        assert!(reader.next().await.is_none());
+        assert!(reader.next().is_none());
         assert_eq!(frame1, vec![0; 277]);
     }
 
-    #[tokio::test]
     #[test_log::test]
-    async fn decode_frame_varint_3() {
+    fn decode_frame_varint_3() {
         let message = [vec![0, 128, 128, 1], vec![0; 16385]].concat();
         let decoder = FrameCodec::new(false);
 
-        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+        let mut reader = FrameReader::new(message, decoder);
 
-        let frame1 = reader.next().await.unwrap().unwrap();
+        let frame1 = reader.next().unwrap().unwrap();
 
-        assert!(reader.next().await.is_none());
+        assert!(reader.next().is_none());
         assert_eq!(frame1, vec![0; 16385]);
     }
 
-    #[tokio::test]
     #[test_log::test]
-    async fn decode_frame_varint_4() {
+    fn decode_frame_varint_4() {
         let message = [vec![0, 128, 128, 128, 1], vec![0; 2097153]].concat();
         let decoder = FrameCodec::new(false);
 
-        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+        let mut reader = FrameReader::new(message, decoder);
 
-        let frame1 = reader.next().await.unwrap().unwrap();
+        let frame1 = reader.next().unwrap().unwrap();
 
-        assert!(reader.next().await.is_none());
+        assert!(reader.next().is_none());
         assert_eq!(frame1, vec![0; 2097153]);
     }
 
-    #[tokio::test]
     #[test_log::test]
-    async fn decode_frame_varint_5() {
-        let message = [vec![0, 128, 128, 128, 128, 1], vec![0; 268435457]].concat();
+    fn decode_frame_varint_5() {
+        let message = [vec![0, 128, 128, 128, 128, 1], vec![0; 64]].concat();
         let decoder = FrameCodec::new(false);
 
-        let mut reader = FramedRead::new(Cursor::new(message), decoder);
+        let mut reader = FrameReader::new(message, decoder);
 
-        assert!(reader.next().await.unwrap().is_err());
+        assert!(reader.next().unwrap().is_err());
     }
 
     use crate::{packet_encrypted, packet_plaintext, parser::ProtoMessage, proto};
@@ -308,9 +343,8 @@ mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
 
-    #[tokio::test]
     #[test_log::test]
-    async fn hello_message_short() {
+    fn hello_message_short() {
         let hello_message = ProtoMessage::HelloResponse(proto::HelloResponse {
             api_version_major: 1,
             api_version_minor: 1,
@@ -320,10 +354,9 @@ mod tests {
         let encoder = FrameCodec::new(false);
         let buffer = Vec::new();
 
-        let mut writer = FramedWrite::new(buffer, encoder);
+        let mut writer = FrameWriter::new(buffer, encoder);
         writer
             .send(packet_plaintext::message_to_packet(&hello_message).unwrap())
-            .await
             .unwrap();
 
         // let bytes = to_unencrypted_frame(&hello_message).unwrap();
@@ -346,9 +379,8 @@ mod tests {
         assert_eq!(writer.get_ref().as_slice(), expected_bytes);
     }
 
-    #[tokio::test]
     #[test_log::test]
-    async fn hello_message_short_encrypted() {
+    fn hello_message_short_encrypted() {
         // Arrange
         let hello_message = ProtoMessage::HelloResponse(proto::HelloResponse {
             api_version_major: 1,
@@ -360,12 +392,14 @@ mod tests {
         let mut cipher = CipherState::<ChaCha20Poly1305>::new(&key, 1);
         let encoder = FrameCodec::new(true);
         let buffer = Vec::new();
-        let mut writer = FramedWrite::new(buffer, encoder);
+        let mut writer = FrameWriter::new(buffer, encoder);
 
         // Act
         writer
-            .send(packet_encrypted::message_to_packet(&hello_message, &mut cipher).unwrap())
-            .await
+            .send(
+                packet_encrypted::message_to_packet(&hello_message, &mut cipher, usize::MAX)
+                    .unwrap(),
+            )
             .unwrap();
 
         // Assert
@@ -381,9 +415,8 @@ mod tests {
         assert_eq!(writer.get_ref().as_slice(), expected_bytes);
     }
 
-    #[tokio::test]
     #[test_log::test]
-    async fn hello_message_overall_length_varint() {
+    fn hello_message_overall_length_varint() {
         // Test that varint length encoding works correctly for long strings
 
         let hello_message = ProtoMessage::HelloResponse(
@@ -396,10 +429,9 @@ mod tests {
         let encoder = FrameCodec::new(false);
         let buffer = Vec::new();
 
-        let mut writer = FramedWrite::new(buffer, encoder);
+        let mut writer = FrameWriter::new(buffer, encoder);
         writer
             .send(packet_plaintext::message_to_packet(&hello_message).unwrap())
-            .await
             .unwrap();
 
         let expected_bytes: Vec<u8> = vec![
@@ -421,9 +453,8 @@ mod tests {
         assert_eq!(writer.get_ref().as_slice()[0..23], expected_bytes[0..23]);
     }
 
-    #[tokio::test]
     #[test_log::test]
-    async fn hello_message_overall_length_varint_longer() {
+    fn hello_message_overall_length_varint_longer() {
         let hello_message = ProtoMessage::HelloResponse(
             proto::HelloResponse {
             api_version_major: 1,
@@ -434,10 +465,9 @@ mod tests {
         let encoder = FrameCodec::new(false);
         let buffer = Vec::new();
 
-        let mut writer = FramedWrite::new(buffer, encoder);
+        let mut writer = FrameWriter::new(buffer, encoder);
         writer
             .send(packet_plaintext::message_to_packet(&hello_message).unwrap())
-            .await
             .unwrap();
         let expected_bytes: Vec<u8> = vec![
             0,   // Zero byte
@@ -458,9 +488,8 @@ mod tests {
         assert_eq!(writer.get_ref().as_slice()[0..23], expected_bytes[0..23]);
     }
 
-    #[tokio::test]
     #[test_log::test]
-    async fn hello_message_longer() {
+    fn hello_message_longer() {
         let hello_message: ProtoMessage = ProtoMessage::HelloResponse(
             proto::HelloResponse {
             api_version_major: 1,
@@ -471,10 +500,9 @@ mod tests {
         let encoder = FrameCodec::new(false);
         let buffer = Vec::new();
 
-        let mut writer = FramedWrite::new(buffer, encoder);
+        let mut writer = FrameWriter::new(buffer, encoder);
         writer
             .send(packet_plaintext::message_to_packet(&hello_message).unwrap())
-            .await
             .unwrap();
         let expected_bytes: Vec<u8> = vec![
             0,   // Zero byte
@@ -495,54 +523,169 @@ mod tests {
         ];
         assert_eq!(writer.get_ref().as_slice()[0..24], expected_bytes[0..24]);
     }
-    #[tokio::test]
     #[test_log::test]
-    async fn construct_frame_plaintext() {
+    fn construct_frame_plaintext() {
         let bytes = vec![8; 5];
         let encoder = FrameCodec::new(false);
         let buffer = Vec::new();
 
-        let mut writer = FramedWrite::new(buffer, encoder);
-        writer.send(bytes).await.unwrap();
+        let mut writer = FrameWriter::new(buffer, encoder);
+        writer.send(bytes).unwrap();
         assert_eq!(writer.get_ref().as_slice()[0..3], vec![0, 4, 8]);
     }
 
-    #[tokio::test]
     #[test_log::test]
-    async fn construct_frame_plaintext_long() {
+    fn construct_frame_plaintext_long() {
         let bytes = vec![8; 131];
         let encoder = FrameCodec::new(false);
         let buffer = Vec::new();
 
-        let mut writer = FramedWrite::new(buffer, encoder);
-        writer.send(bytes).await.unwrap();
+        let mut writer = FrameWriter::new(buffer, encoder);
+        writer.send(bytes).unwrap();
         assert_eq!(writer.get_ref().as_slice()[0..4], vec![0, 130, 1, 8]);
     }
 
-    #[tokio::test]
     #[test_log::test]
-    async fn construct_frame_encrypted() {
+    fn construct_frame_encrypted() {
         let bytes = vec![8; 5];
         let encoder = FrameCodec::new(true);
         let buffer = Vec::new();
-        let mut writer = FramedWrite::new(buffer, encoder);
+        let mut writer = FrameWriter::new(buffer, encoder);
 
         // Act
-        writer.send(bytes).await.unwrap();
+        writer.send(bytes).unwrap();
         assert_eq!(writer.get_ref().as_slice()[0..4], vec![1, 0, 5, 8]);
     }
 
-    #[tokio::test]
     #[test_log::test]
-    async fn construct_frame_encrypted_long() {
+    fn construct_frame_encrypted_long() {
         let bytes = vec![8; 128];
 
         let encoder = FrameCodec::new(true);
         let buffer = Vec::new();
-        let mut writer = FramedWrite::new(buffer, encoder);
+        let mut writer = FrameWriter::new(buffer, encoder);
 
         // Act
-        writer.send(bytes).await.unwrap();
+        writer.send(bytes).unwrap();
         assert_eq!(writer.get_ref().as_slice()[0..4], vec![1, 0, 128, 8]);
+    }
+
+    #[test]
+    fn decode_needs_more_data_for_every_strict_prefix() {
+        for (encrypted, message) in [
+            (false, vec![0, 3, 1, 4, 3, 2]),
+            (false, [vec![0, 148, 2], vec![7; 277]].concat()),
+            (true, vec![1, 0, 3, 4, 3, 2]),
+        ] {
+            let codec = FrameCodec::new(encrypted);
+            for end in 0..message.len() {
+                assert_eq!(
+                    codec.decode(&message[..end]).unwrap(),
+                    None,
+                    "prefix of {end} bytes must not decode"
+                );
+            }
+            let (frame, consumed) = codec.decode(&message).unwrap().unwrap();
+            assert_eq!(consumed, message.len());
+            assert_eq!(frame, &message[message.len() - frame.len()..]);
+        }
+    }
+
+    #[test]
+    fn decode_leaves_following_bytes_untouched() {
+        let message: Vec<u8> = vec![0, 0, 7, 0, 0];
+        let (frame, consumed) = FrameCodec::new(false).decode(&message).unwrap().unwrap();
+        assert_eq!(frame, [7]);
+        assert_eq!(consumed, 3);
+    }
+
+    #[test]
+    fn decode_rejects_wrong_preamble() {
+        assert!(matches!(
+            FrameCodec::new(false).decode(&[1, 0, 1, 3]),
+            Err(FrameError::Malformed(_))
+        ));
+        assert!(matches!(
+            FrameCodec::new(true).decode(&[0, 1, 4, 3]),
+            Err(FrameError::Malformed(_))
+        ));
+    }
+
+    #[test]
+    fn decode_rejects_frames_above_max_length() {
+        // The limit is checked from the header alone, before the body arrived.
+        assert!(matches!(
+            FrameCodec::with_max_length(false, 16).decode(&[0, 16]),
+            Err(FrameError::Malformed(_))
+        ));
+        assert!(matches!(
+            FrameCodec::with_max_length(true, 16).decode(&[1, 0, 17]),
+            Err(FrameError::Malformed(_))
+        ));
+        // A frame of exactly the maximum length is still fine.
+        assert_eq!(
+            FrameCodec::with_max_length(false, 16)
+                .decode(&[0, 15])
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn encode_rejects_frames_above_max_length() {
+        let mut buffer = Vec::new();
+        assert!(matches!(
+            FrameCodec::with_max_length(false, 16).encode(&[0; 17], &mut buffer),
+            Err(FrameError::Malformed(_))
+        ));
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn encode_rejects_empty_plaintext_frame() {
+        let mut buffer = Vec::new();
+        assert!(matches!(
+            FrameCodec::new(false).encode(&[], &mut buffer),
+            Err(FrameError::Malformed(_))
+        ));
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn encode_rejects_encrypted_frame_exceeding_u16_length() {
+        let mut buffer = Vec::new();
+        assert!(matches!(
+            FrameCodec::new(true).encode(&vec![0; 65536], &mut buffer),
+            Err(FrameError::Malformed(_))
+        ));
+        assert!(buffer.is_empty());
+        assert!(
+            FrameCodec::new(true)
+                .encode(&vec![0; 65535], &mut buffer)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn encode_appends_to_existing_buffer() {
+        let mut buffer = vec![9];
+        FrameCodec::new(false).encode(&[5], &mut buffer).unwrap();
+        FrameCodec::new(true).encode(&[5], &mut buffer).unwrap();
+        assert_eq!(buffer, vec![9, 0, 0, 5, 1, 0, 1, 5]);
+    }
+
+    #[test]
+    fn encode_decode_round_trip() {
+        for encrypted in [false, true] {
+            let codec = FrameCodec::new(encrypted);
+            for length in [1, 2, 127, 128, 129, 16384, 16385, 65535] {
+                let item = vec![0xAB; length];
+                let mut buffer = Vec::new();
+                codec.encode(&item, &mut buffer).unwrap();
+                let (frame, consumed) = codec.decode(&buffer).unwrap().unwrap();
+                assert_eq!(frame, item.as_slice());
+                assert_eq!(consumed, buffer.len());
+            }
+        }
     }
 }

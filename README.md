@@ -14,6 +14,7 @@ Implementation of the [esphome native api](https://esphome.io/components/api.htm
 
 - Full support for ESPHome native API protocol, including encryption. The crate can be used for Server and Client implementations.
 - [ ] Support for multiple ESPHome versions via feature flags (not yet implemented)
+- Runtime-free protocol core (`protocol::Protocol`) that works without tokio and on `no_std` targets, see [Usage without tokio / on embedded devices](#usage-without-tokio--on-embedded-devices).
 
 
 ## Usage
@@ -89,6 +90,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+### Usage without tokio / on embedded devices
+
+The tokio based API above is a thin wrapper around `protocol::Protocol`, a sans-IO state machine: bytes read from the transport go in, bytes to write and messages for the application come out. It does not use sockets, timers or an async runtime, so it can be driven from any runtime, from blocking code or from a `no_std` firmware.
+
+Disable the default features and enable `protocol` together with the ESPHome version to use:
+
+```toml
+[dependencies]
+esphome-native-api = { version = "0.0.0", default-features = false, features = ["protocol", "version_2026_10_2"] }
+```
+
+```rust
+use esphome_native_api::protocol::{Config, Event, Protocol};
+
+# fn main() -> Result<(), esphome_native_api::Error> {
+let mut protocol = Protocol::new(Config::new("my-device"));
+
+// Feed whatever was read from the transport ...
+# let bytes_read: &[u8] = &[0x00, 0x00, 0x07];
+protocol.receive(bytes_read);
+
+// ... and act on the resulting events.
+while let Some(event) = protocol.poll()? {
+    match event {
+        Event::Connected => { /* handshake done, `protocol.send(..)` works now */ }
+        Event::Transmit(bytes) => { /* write `bytes` to the transport */ }
+        Event::Message(message) => { /* a message for the application */ }
+        Event::Close => { /* close the transport */ }
+        _ => {}
+    }
+}
+# Ok(())
+# }
+```
+
+Notes for `no_std` targets:
+
+- A global allocator is required (`alloc`).
+- The noise handshake of encrypted connections needs random numbers, which are obtained via [`getrandom` 0.2](https://docs.rs/getrandom/0.2). On targets it does not support out of the box, enable its `custom` feature in your firmware and register your hardware RNG with `getrandom::register_custom_getrandom!`.
+- `Config::max_frame_length` bounds how much a peer can make the device buffer; the default of 8 MiB is meant for hosts, lower it on small devices.
 
 ## Trivia
 

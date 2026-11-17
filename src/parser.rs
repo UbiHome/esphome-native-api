@@ -2,6 +2,8 @@
 
 // TODO: Parser should part of the proto generator
 
+use alloc::vec::Vec;
+
 use prost::Message;
 
 use crate::proto::{

@@ -8,6 +8,11 @@ use std::path::Path;
 const CURRENT_VERSION: &str = "2026.10.2";
 const LAST_SUPPLIED_VERSION: &str = "2025.2.1";
 
+// Non-version features. The generator rewrites the whole `[features]` table of
+// the crate's `Cargo.toml`, so these have to be kept in sync with it.
+const STD_FEATURE: &str = r#"std = ["protocol", "dep:tokio", "dep:typed-builder", "prost/std", "thiserror/std", "base64/std", "log/std", "noise-protocol/use_std"]"#;
+const PROTOCOL_FEATURE: &str = r#"protocol = ["dep:log", "dep:thiserror", "dep:base64", "dep:noise-protocol", "dep:noise-rust-crypto"]"#;
+
 fn get_package_name(version: &str) -> String {
     format!("version_{}", version).replace(".", "_")
 }
@@ -153,7 +158,18 @@ async fn main() {
       "default = [\"std\", \"{}\"] # To change the default version, update `CURRENT_VERSION` in `generator/src/main.rs`.",
       default_package_name
     ).unwrap();
-    writeln!(file, "std = []").unwrap();
+    writeln!(
+        file,
+        "# Tokio based API (`EspHomeApi`, `EspHomeServer`, `Connection`)."
+    )
+    .unwrap();
+    writeln!(file, "{}", STD_FEATURE).unwrap();
+    writeln!(
+        file,
+        "# Runtime-free protocol core (`protocol::Protocol`). Works on `no_std` targets with `alloc`."
+    )
+    .unwrap();
+    writeln!(file, "{}", PROTOCOL_FEATURE).unwrap();
 
     for version in versions {
         writeln!(file, "{} = []", version).unwrap();

@@ -791,3 +791,312 @@ async fn test_start_fails_with_malformed_frame_on_empty_handshake_frame() {
         "unexpected error: {error}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Message routing between the peer and the `Connection` handle
+// ---------------------------------------------------------------------------
+
+use esphome_native_api::parser::ProtoMessage;
+use esphome_native_api::proto::ListEntitiesDoneResponse;
+
+// ListEntitiesRequest: plaintext preamble, empty payload, message type 11
+const LIST_ENTITIES_REQUEST_FRAME: [u8; 3] = [0x00, 0x00, 0x0B];
+// ListEntitiesDoneResponse: plaintext preamble, empty payload, message type 19
+const LIST_ENTITIES_DONE_RESPONSE_FRAME: [u8; 3] = [0x00, 0x00, 0x13];
+
+#[tokio::test]
+async fn test_receiver_gets_forwarded_messages_and_sender_reaches_peer() {
+    let (mut client_stream, server_stream) = duplex(1024);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .build()
+        .unwrap();
+
+    client_stream
+        .write_all(&plaintext_hello_request_frame())
+        .await
+        .expect("failed to write request frame");
+    let connection = api.start(server_stream).await.expect("server start failed");
+    let sender = connection.sender();
+    let mut receiver = connection.receiver();
+
+    let mut response_frame = vec![0u8; plaintext_hello_response_frame().len()];
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        client_stream.read_exact(&mut response_frame),
+    )
+    .await
+    .expect("timed out waiting for response")
+    .expect("failed to read response frame");
+    assert_eq!(response_frame, plaintext_hello_response_frame());
+
+    // Peer -> consumer
+    client_stream
+        .write_all(&LIST_ENTITIES_REQUEST_FRAME)
+        .await
+        .expect("failed to write list entities request");
+    let message = tokio::time::timeout(Duration::from_secs(1), receiver.recv())
+        .await
+        .expect("timed out waiting for forwarded message")
+        .expect("receiver closed");
+    assert!(
+        matches!(message, ProtoMessage::ListEntitiesRequest(_)),
+        "unexpected message: {message:?}"
+    );
+
+    // Consumer -> peer
+    sender
+        .send(ProtoMessage::ListEntitiesDoneResponse(
+            ListEntitiesDoneResponse {},
+        ))
+        .await
+        .expect("failed to queue message");
+    let mut frame = [0u8; 3];
+    tokio::time::timeout(Duration::from_secs(1), client_stream.read_exact(&mut frame))
+        .await
+        .expect("timed out waiting for sent message")
+        .expect("failed to read sent message");
+    assert_eq!(frame, LIST_ENTITIES_DONE_RESPONSE_FRAME);
+}
+
+#[tokio::test]
+async fn test_frame_split_across_reads_is_reassembled() {
+    let (mut client_stream, server_stream) = duplex(1024);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .build()
+        .unwrap();
+
+    let request_frame = plaintext_hello_request_frame();
+    let (first_half, second_half) = request_frame.split_at(request_frame.len() / 2);
+
+    client_stream
+        .write_all(first_half)
+        .await
+        .expect("failed to write first half");
+    let _connection = api.start(server_stream).await.expect("server start failed");
+
+    // Give the connection task the chance to read the incomplete frame.
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    client_stream
+        .write_all(second_half)
+        .await
+        .expect("failed to write second half");
+
+    let mut response_frame = vec![0u8; plaintext_hello_response_frame().len()];
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        client_stream.read_exact(&mut response_frame),
+    )
+    .await
+    .expect("timed out waiting for response")
+    .expect("failed to read response frame");
+    assert_eq!(response_frame, plaintext_hello_response_frame());
+}
+
+#[tokio::test]
+async fn test_sender_is_closed_after_disconnect() {
+    let (mut client_stream, server_stream) = duplex(1024);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .build()
+        .unwrap();
+
+    client_stream
+        .write_all(&[0x00, 0x00, 0x05])
+        .await
+        .expect("failed to write disconnect request frame");
+    let connection = api.start(server_stream).await.expect("server start failed");
+    let sender = connection.sender();
+
+    let mut response_frame = [0u8; 3];
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        client_stream.read_exact(&mut response_frame),
+    )
+    .await
+    .expect("timed out waiting for disconnect response")
+    .expect("failed to read disconnect response frame");
+    assert_eq!(response_frame, [0x00, 0x00, 0x06]);
+
+    // The write side shut down after the DisconnectResponse: the peer sees end
+    // of stream and the consumer can no longer queue messages.
+    let mut rest = Vec::new();
+    tokio::time::timeout(Duration::from_secs(1), client_stream.read_to_end(&mut rest))
+        .await
+        .expect("timed out waiting for end of stream")
+        .expect("failed to read until end of stream");
+    assert!(
+        rest.is_empty(),
+        "unexpected bytes after disconnect: {rest:?}"
+    );
+
+    tokio::time::timeout(Duration::from_secs(1), sender.closed())
+        .await
+        .expect("sender should be closed after the disconnect");
+    assert!(
+        sender
+            .send(ProtoMessage::ListEntitiesDoneResponse(
+                ListEntitiesDoneResponse {}
+            ))
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn test_wait_reports_io_error_when_stream_ends_mid_frame() {
+    let (mut client_stream, server_stream) = duplex(1024);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .build()
+        .unwrap();
+
+    let request_frame = plaintext_hello_request_frame();
+    client_stream
+        .write_all(&request_frame[..request_frame.len() - 1])
+        .await
+        .expect("failed to write truncated frame");
+    let connection = api.start(server_stream).await.expect("server start failed");
+
+    client_stream
+        .shutdown()
+        .await
+        .expect("failed to shutdown client");
+
+    let outcome = tokio::time::timeout(Duration::from_secs(1), connection.wait())
+        .await
+        .expect("timed out waiting for connection to end");
+    assert!(
+        matches!(outcome, Err(Error::Io(_))),
+        "unexpected outcome: {outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_receiver_closes_when_connection_ends() {
+    let (mut client_stream, server_stream) = duplex(1024);
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .build()
+        .unwrap();
+
+    client_stream
+        .write_all(&plaintext_hello_request_frame())
+        .await
+        .expect("failed to write request frame");
+    let connection = api.start(server_stream).await.expect("server start failed");
+    let mut receiver = connection.receiver();
+
+    drop(client_stream);
+
+    let result = tokio::time::timeout(Duration::from_secs(1), receiver.recv())
+        .await
+        .expect("timed out waiting for receiver to close");
+    assert!(
+        matches!(
+            result,
+            Err(tokio::sync::broadcast::error::RecvError::Closed)
+        ),
+        "unexpected result: {result:?}"
+    );
+}
+
+/// A stream whose writes fail once the handshake is over, while reads keep
+/// delivering what the test feeds in.
+struct FailingWrites {
+    reader: tokio::io::DuplexStream,
+}
+
+impl tokio::io::AsyncRead for FailingWrites {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.reader).poll_read(cx, buf)
+    }
+}
+
+impl tokio::io::AsyncWrite for FailingWrites {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        _buf: &[u8],
+    ) -> std::task::Poll<Result<usize, std::io::Error>> {
+        std::task::Poll::Ready(Err(std::io::ErrorKind::BrokenPipe.into()))
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
+#[tokio::test]
+async fn test_wait_reports_write_closed_when_answers_cannot_be_written() {
+    let (mut client_stream, server_reader) = duplex(1024);
+    let stream = FailingWrites {
+        reader: server_reader,
+    };
+
+    let api = EspHomeApi::builder()
+        .name(TEST_DEVICE_NAME.to_string())
+        .build()
+        .unwrap();
+
+    // Forwarded first, although nothing can be written ...
+    client_stream
+        .write_all(&LIST_ENTITIES_REQUEST_FRAME)
+        .await
+        .expect("failed to write list entities request");
+    let connection = api.start(stream).await.expect("server start failed");
+    let sender = connection.sender();
+    let mut receiver = connection.receiver();
+
+    let message = tokio::time::timeout(Duration::from_secs(1), receiver.recv())
+        .await
+        .expect("timed out waiting for forwarded message")
+        .expect("receiver closed");
+    assert!(matches!(message, ProtoMessage::ListEntitiesRequest(_)));
+
+    // ... then the answer to the hello request fails to be written ...
+    client_stream
+        .write_all(&plaintext_hello_request_frame())
+        .await
+        .expect("failed to write request frame");
+    tokio::time::timeout(Duration::from_secs(1), sender.closed())
+        .await
+        .expect("sender should be closed once writing failed");
+
+    // ... and the next request that needs an answer ends the connection.
+    client_stream
+        .write_all(&[0x00, 0x00, 0x07])
+        .await
+        .expect("failed to write ping request");
+
+    let outcome = tokio::time::timeout(Duration::from_secs(1), connection.wait())
+        .await
+        .expect("timed out waiting for connection to end");
+    assert!(
+        matches!(
+            outcome,
+            Err(Error::Disconnected(DisconnectReason::WriteClosed))
+        ),
+        "unexpected outcome: {outcome:?}"
+    );
+}

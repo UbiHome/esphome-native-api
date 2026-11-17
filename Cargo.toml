@@ -20,20 +20,18 @@ include = [
 ]
 
 [dependencies]
-log = "0.4"
-tokio = { version = "1", features = ["full"] }
-prost = "0.13.5"
-typed-builder = "0.21.0"
-constant_time_eq = "0.4.2"
-base64 = "0.22.1"
-noise-rust-crypto = "0.6.2"
-noise-protocol = "0.2.0"
-byteorder = "1.5.0"
-tokio-util = { version = "0.7.17", features = ["codec"]  }
-tokio-stream = "0.1.17"
-bytes = "1.11.0"
-futures = "0.3.31"
-thiserror = "2"
+prost = { version = "0.13.5", default-features = false, features = ["derive"] }
+
+# Protocol core (`protocol` feature): runtime-free and `no_std` + `alloc` compatible.
+log = { version = "0.4", optional = true }
+thiserror = { version = "2", default-features = false, optional = true }
+base64 = { version = "0.22.1", default-features = false, features = ["alloc"], optional = true }
+noise-protocol = { version = "0.2.0", default-features = false, features = ["use_alloc"], optional = true }
+noise-rust-crypto = { version = "0.6.2", default-features = false, features = ["use-x25519", "use-chacha20poly1305", "use-sha2"], optional = true }
+
+# Tokio front end (`std` feature).
+tokio = { version = "1", features = ["full"], optional = true }
+typed-builder = { version = "0.21.0", optional = true }
 
 [workspace]
 resolver = "2"
@@ -43,9 +41,33 @@ members = ["generator"]
 pretty_env_logger = "0.5.0"
 test-log = { version = "0.2.16", features = ["log", "color"] }
 
+[[example]]
+name = "easy_server"
+required-features = ["std"]
+
+[[example]]
+name = "encrypted_server"
+required-features = ["std"]
+
+[[example]]
+name = "test_server"
+required-features = ["std"]
+
+[[test]]
+name = "esphomeapi_test"
+required-features = ["std"]
+
+[[test]]
+name = "protocol_test"
+required-features = ["protocol"]
+
+# The features table must stay last: the generator rewrites everything from its header on.
 [features]
 default = ["std", "version_2026_10_2"] # To change the default version, update `CURRENT_VERSION` in `generator/src/main.rs`.
-std = []
+# Tokio based API (`EspHomeApi`, `EspHomeServer`, `Connection`).
+std = ["protocol", "dep:tokio", "dep:typed-builder", "prost/std", "thiserror/std", "base64/std", "log/std", "noise-protocol/use_std"]
+# Runtime-free protocol core (`protocol::Protocol`). Works on `no_std` targets with `alloc`.
+protocol = ["dep:log", "dep:thiserror", "dep:base64", "dep:noise-protocol", "dep:noise-rust-crypto"]
 version_2026_10_2 = []
 version_2026_10_1 = []
 version_2026_10_0 = []
