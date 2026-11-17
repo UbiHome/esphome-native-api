@@ -11,7 +11,12 @@
 //!   and keep the connection alive; the read loop does exactly that internally.
 //! - Every other [`FrameError`] / [`HandshakeError`] / [`Error::Io`] variant is a
 //!   genuine fault that tears the connection down.
+//!
+//! The types are available without the `std` feature; only the variants that
+//! carry a [`std::io`] type ([`Error::Io`], [`DisconnectReason::Reset`]) need it.
 
+use alloc::string::String;
+#[cfg(feature = "std")]
 use std::io;
 
 use thiserror::Error;
@@ -39,7 +44,15 @@ pub enum Error {
     #[error("invalid configuration: {0}")]
     Config(String),
 
+    /// The connection has not finished its handshake yet, so no message can be
+    /// sent. Only returned by [`crate::protocol::Protocol::send`].
+    #[error("connection is not established yet")]
+    NotEstablished,
+
     /// An unexpected I/O error that is not a normal disconnect.
+    ///
+    /// Only available with the `std` feature.
+    #[cfg(feature = "std")]
     #[error("io error: {0}")]
     Io(#[from] io::Error),
 
@@ -64,6 +77,9 @@ pub enum DisconnectReason {
 
     /// The peer reset the connection abruptly (`ConnectionReset`, `BrokenPipe`,
     /// `ConnectionAborted`, …). Routine for clients such as Home Assistant.
+    ///
+    /// Only available with the `std` feature.
+    #[cfg(feature = "std")]
     #[error("connection reset: {0:?}")]
     Reset(io::ErrorKind),
 

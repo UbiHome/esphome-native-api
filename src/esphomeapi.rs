@@ -4,6 +4,10 @@
 //! with ESPHome devices. It manages connection establishment, encryption handshakes,
 //! message framing, and protocol state.
 //!
+//! The protocol itself lives in [`crate::protocol::Protocol`], a state machine
+//! without any I/O. [`EspHomeApi`] drives it over a tokio stream; use the state
+//! machine directly to run the protocol on another runtime or without `std`.
+//!
 //! # Examples
 //!
 //! ## Plaintext Connection
@@ -51,60 +55,25 @@
 //! }
 //! ```
 
-use base64::prelude::*;
-use futures::sink::SinkExt;
 use log::debug;
 use log::error;
 use log::info;
-use log::trace;
-use noise_protocol::CipherState;
-use noise_protocol::ErrorKind;
-use noise_protocol::HandshakeState;
-use noise_protocol::patterns::noise_nn_psk0;
-use noise_rust_crypto::ChaCha20Poly1305;
-use noise_rust_crypto::Sha256;
-use noise_rust_crypto::X25519;
-use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::Mutex;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use tokio_stream::StreamExt;
-use tokio_util::codec::FramedRead;
-use tokio_util::codec::FramedWrite;
 use typed_builder::TypedBuilder;
 
 use crate::connection::Connection;
 use crate::error::{DisconnectReason, Error, FrameError, HandshakeError};
-use crate::frame::FrameCodec;
-use crate::packet_encrypted;
-use crate::packet_plaintext;
 use crate::parser::ProtoMessage;
-use crate::proto::{
-    self, AuthenticationResponse, DeviceInfoResponse, DisconnectResponse, HelloResponse,
-    PingResponse,
-};
+use crate::proto::{self, DeviceInfoResponse, HelloResponse};
+use crate::protocol::{self, Config, Event, Protocol};
 
-async fn write_error_and_disconnect<W>(mut writer: FramedWrite<W, FrameCodec>, message: &str)
-where
-    W: AsyncWrite + Unpin,
-{
-    error!("API Failure: {}. Disconnecting.", message);
-    let packet = [[1].to_vec(), message.as_bytes().to_vec()].concat();
-    if let Err(err) = writer.send(packet).await {
-        debug!("failed to send error frame to peer: {:?}", err);
-    }
-    if let Err(err) = writer.flush().await {
-        debug!("failed to flush error frame to peer: {:?}", err);
-    }
-    let mut tcp_write = writer.into_inner();
-    if let Err(err) = tcp_write.shutdown().await {
-        error!("failed to shutdown socket: {:?}", err);
-    }
-}
+/// Size of the buffer bytes are read into from the stream.
+const READ_BUFFER_SIZE: usize = 4096;
 
-/// Classify an I/O error surfaced by the framed reader into a typed [`Error`].
+/// Classify an I/O error surfaced while reading into a typed [`Error`].
 ///
 /// A peer going away (`ConnectionReset`, `BrokenPipe`, …) is an expected
 /// terminal condition, not a failure; malformed framing is a [`FrameError`];
@@ -140,19 +109,110 @@ fn handshake_io_err(err: std::io::Error) -> Error {
     }
 }
 
-/// Read the next frame during the handshake phase, mapping a mid-handshake
-/// disconnect to [`HandshakeError::Aborted`].
-async fn read_handshake_frame<R>(reader: &mut FramedRead<R, FrameCodec>) -> Result<Vec<u8>, Error>
+/// The terminal outcome for a stream that reached end of file.
+///
+/// A stream that ends in the middle of a frame is reported as an I/O error;
+/// everything else is decided by the protocol state.
+fn eof_error(protocol: &mut Protocol) -> Error {
+    if !protocol.is_closed() && protocol.has_buffered_data() {
+        let _ = protocol.on_eof();
+        return Error::Io(std::io::Error::other("bytes remaining on stream"));
+    }
+    protocol.on_eof()
+}
+
+/// Write `bytes` to the peer and flush them.
+async fn write_frame<W>(writer: &mut W, bytes: &[u8]) -> std::io::Result<()>
 where
-    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
 {
-    match reader.next().await {
-        Some(Ok(frame)) => Ok(frame),
-        Some(Err(e)) => Err(match classify_read_error(e) {
-            Error::Disconnected(_) => HandshakeError::Aborted.into(),
-            other => other,
-        }),
-        None => Err(HandshakeError::Aborted.into()),
+    writer.write_all(bytes).await?;
+    writer.flush().await
+}
+
+/// Receive the next message the consumer wants to send, or wait forever once
+/// nothing can be sent anymore.
+async fn next_outgoing(
+    receiver: &mut Option<mpsc::Receiver<ProtoMessage>>,
+) -> Option<ProtoMessage> {
+    match receiver {
+        Some(receiver) => receiver.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Drives an established connection until it ends: moves bytes between the
+/// stream and the [`Protocol`] state machine and messages between the state
+/// machine and the consumer's channels. Returns why the connection ended.
+async fn run_connection<S>(
+    mut protocol: Protocol,
+    mut reader: ReadHalf<S>,
+    mut writer: WriteHalf<S>,
+    outgoing_rx: mpsc::Receiver<ProtoMessage>,
+    incoming_tx: broadcast::Sender<ProtoMessage>,
+    mut buffer: Vec<u8>,
+) -> Error
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    // `None` once no further message of the consumer can be sent. Dropping the
+    // receiver makes the consumer's `send` fail, so it notices as well.
+    let mut outgoing_rx = Some(outgoing_rx);
+
+    loop {
+        // Act on everything the state machine has to say.
+        loop {
+            match protocol.poll() {
+                Ok(Some(Event::Transmit(bytes))) => {
+                    if let Err(e) = write_frame(&mut writer, &bytes).await {
+                        if is_peer_gone(&e) {
+                            debug!("Peer gone while sending, closing write side.");
+                        } else {
+                            error!("Failed to send message: {e}");
+                        }
+                        protocol.close_write();
+                        outgoing_rx = None;
+                    }
+                }
+                Ok(Some(Event::Message(message))) => {
+                    // No active receivers is normal (the consumer dropped its
+                    // handle); the message is simply dropped.
+                    let _ = incoming_tx.send(message);
+                }
+                Ok(Some(Event::Close)) => {
+                    debug!("Disconnecting");
+                    if let Err(err) = writer.shutdown().await {
+                        error!("failed to shutdown socket: {:?}", err);
+                    }
+                    outgoing_rx = None;
+                }
+                Ok(Some(Event::Connected)) => {}
+                Ok(None) => break,
+                Err(e) => return e,
+            }
+        }
+
+        // Wait for bytes from the peer or a message from the consumer.
+        tokio::select! {
+            read = reader.read(&mut buffer) => match read {
+                Ok(0) => return eof_error(&mut protocol),
+                Ok(n) => protocol.receive(&buffer[..n]),
+                Err(e) => return classify_read_error(e),
+            },
+            message = next_outgoing(&mut outgoing_rx) => match message {
+                Some(message) => {
+                    if let Err(e) = protocol.send(&message) {
+                        error!("Failed to encode outgoing message: {e}");
+                        protocol.close_write();
+                        outgoing_rx = None;
+                    }
+                }
+                None => {
+                    debug!("All senders dropped, no further messages to send.");
+                    outgoing_rx = None;
+                }
+            },
+        }
     }
 }
 
@@ -255,13 +315,10 @@ pub struct EspHomeApi {
 /// construction rather than partway through the connection handshake.
 impl From<EspHomeApi> for EspHomeApiBuildResult {
     fn from(mut api: EspHomeApi) -> Self {
-        api.noise_psk =
-            match api.encryption_key.as_deref() {
-                Some(key) => Some(BASE64_STANDARD.decode(key).map_err(|e| {
-                    Error::Config(format!("encryption key is not valid base64: {e}"))
-                })?),
-                None => None,
-            };
+        api.noise_psk = match api.encryption_key.as_deref() {
+            Some(key) => Some(protocol::decode_encryption_key(key)?),
+            None => None,
+        };
         Ok(api)
     }
 }
@@ -314,10 +371,11 @@ impl EspHomeApi {
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
-        // Channel for messages
-        let (answer_messages_tx, mut answer_messages_rx) = mpsc::channel::<ProtoMessage>(16);
-        let (outgoing_messages_tx, outgoing_messages_rx) = broadcast::channel::<ProtoMessage>(16);
+        Self::start_protocol(Protocol::new(self.protocol_config()), stream).await
+    }
 
+    /// Configuration of the protocol state machine for a new connection.
+    fn protocol_config(&self) -> Config {
         #[allow(deprecated)]
         let device_info = DeviceInfoResponse {
             api_encryption_supported: self.encryption_key.is_some(),
@@ -357,347 +415,96 @@ impl EspHomeApi {
             name: self.name.clone(),
         };
 
-        // Per-connection cipher state — created fresh so multiple concurrent connections
-        // never share encryption context.
-        let encrypt_cypher: Arc<Mutex<Option<CipherState<ChaCha20Poly1305>>>> =
-            Arc::new(Mutex::new(None));
-        let decrypt_cypher: Arc<Mutex<Option<CipherState<ChaCha20Poly1305>>>> =
-            Arc::new(Mutex::new(None));
+        let mut config = Config::new(self.name.clone());
+        config.mac = self.mac.clone();
+        config.noise_psk = self.noise_psk.clone();
+        config.hello_response = hello_response;
+        config.device_info = device_info;
+        config
+    }
 
-        // Stage 1: Initialization
-        trace!("Init Connection: Stage 1");
+    /// Runs the handshake of `protocol` over `stream` and, once it succeeded,
+    /// hands the connection to a background task.
+    async fn start_protocol<S>(mut protocol: Protocol, stream: S) -> Result<Connection, Error>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
+        // Channel for messages
+        let (answer_messages_tx, answer_messages_rx) = mpsc::channel::<ProtoMessage>(16);
+        let (outgoing_messages_tx, outgoing_messages_rx) = broadcast::channel::<ProtoMessage>(16);
 
-        let (stream_read, stream_write) = tokio::io::split(stream);
-        let mut stream_read = BufReader::new(stream_read);
+        let (mut reader, mut writer) = tokio::io::split(stream);
+        let mut buffer = vec![0u8; READ_BUFFER_SIZE];
 
-        let peeked_bytes = stream_read.fill_buf().await.map_err(handshake_io_err)?;
-        if peeked_bytes.is_empty() {
-            return Err(HandshakeError::NoData.into());
-        }
-
-        trace!("TCP Peeked: {:02X?}", &peeked_bytes[0..1]);
-
-        let preamble = peeked_bytes[0] as usize;
-
-        let plaintext_communication = match preamble {
-            0 => {
-                debug!("Cleartext messaging");
-                true
-            }
-            1 => {
-                trace!("Encrypted messaging");
-                false
-            }
-            _ => {
-                return Err(HandshakeError::InvalidMarker(preamble as u8).into());
-            }
-        };
-        let encrypted = !plaintext_communication;
-
-        let decoder = FrameCodec::new(encrypted);
-        let encoder = FrameCodec::new(encrypted);
-        let mut reader = FramedRead::new(stream_read, decoder);
-        let mut writer = FramedWrite::new(stream_write, encoder);
-
-        if plaintext_communication {
-            if self.encryption_key.is_some() {
-                let encoder = FrameCodec::new(true);
-                let writer = FramedWrite::new(writer.into_inner(), encoder);
-                // The literal string goes on the wire to the connecting ESPHome
-                // client; the returned error is for this crate's caller.
-                write_error_and_disconnect(writer, "Only key encryption is enabled").await;
-                return Err(HandshakeError::EncryptionProtocolMismatch(
-                    "a client connected in plaintext, but an encryption key is configured (encryption is required)",
-                )
-                .into());
-            }
-        } else {
-            if self.encryption_key.is_none() {
-                let encoder = FrameCodec::new(false);
-                let writer = FramedWrite::new(writer.into_inner(), encoder);
-                // The plaintext framing (0x00 preamble) tells the encrypted
-                // client that this device speaks plaintext, so it can raise a
-                // precise error instead of a generic socket failure.
-                write_error_and_disconnect(writer, "No encrypted communication allowed").await;
-                return Err(HandshakeError::EncryptionProtocolMismatch(
-                    "a client requested an encrypted connection, but no encryption key is configured",
-                )
-                .into());
-            }
-
-            let frame_noise_hello = read_handshake_frame(&mut reader).await?;
-            debug!("Frame 1: {:02X?}", &frame_noise_hello);
-
-            let message_server_hello =
-                packet_encrypted::generate_server_hello_frame(self.name.clone(), self.mac.clone());
-
-            writer
-                .send(message_server_hello.clone())
-                .await
-                .map_err(handshake_io_err)?;
-            writer.flush().await.map_err(handshake_io_err)?;
-
-            let frame_handshake_request = read_handshake_frame(&mut reader).await?;
-            debug!("Frame 2: {:02X?}", &frame_handshake_request);
-
-            // Similar to https://github.com/esphome/aioesphomeapi/blob/60bcd1698dd622aeac6f4b5ec448bab0e3467c4f/aioesphomeapi/_frame_helper/noise.py#L248C17-L255
-            let mut handshake_state: HandshakeState<X25519, ChaCha20Poly1305, Sha256> =
-                HandshakeState::new(
-                    noise_nn_psk0(),
-                    false,
-                    // NEXT: This is somehow set from the first api message?
-                    b"NoiseAPIInit\0\0",
-                    None,
-                    None,
-                    None,
-                    None,
-                );
-
-            let psk = match self.noise_psk.as_ref() {
-                Some(psk) => psk,
-                // Unreachable: we return above when no key is configured but the
-                // peer requested encryption. Handled defensively to avoid a panic.
-                None => return Err(Error::Config("encryption key missing".to_string())),
-            };
-
-            handshake_state.push_psk(psk);
-            // Ignore message type byte
-            let handshake_payload = frame_handshake_request
-                .get(1..)
-                .ok_or(HandshakeError::MalformedFrame)?;
-            match handshake_state.read_message_vec(handshake_payload) {
-                Ok(_) => {}
-                Err(e) => match e.kind() {
-                    ErrorKind::Decryption => {
-                        // The literal string goes on the wire to the connecting
-                        // ESPHome client; the returned error is for this crate's
-                        // caller.
-                        write_error_and_disconnect(writer, "Handshake MAC failure").await;
-                        return Err(HandshakeError::MacFailure.into());
-                    }
-                    _ => {
-                        debug!("Failed to read message: {}", e);
-                    }
-                },
-            }
-
-            let out = handshake_state
-                .write_message_vec(b"")
-                .map_err(|e| Error::Handshake(HandshakeError::Crypto(e.to_string())))?;
-            {
-                let mut encrypt_cipher_changer = encrypt_cypher.lock().await;
-                let mut decrypt_cipher_changer = decrypt_cypher.lock().await;
-                let (decrypt_cipher, encrypt_cipher) = handshake_state.get_ciphers();
-                *encrypt_cipher_changer = Some(encrypt_cipher);
-                *decrypt_cipher_changer = Some(decrypt_cipher);
-            }
-
-            let mut message_handshake = vec![0];
-            message_handshake.extend(out);
-
-            debug!("Sending handshake");
-            writer
-                .send(message_handshake.clone())
-                .await
-                .map_err(handshake_io_err)?;
-            writer.flush().await.map_err(handshake_io_err)?;
-        }
-
-        debug!("Initialization done.");
-
-        // Asynchronously wait for an inbound socket.
-        let (cancellation_write_tx, mut cancellation_write_rx) = oneshot::channel();
-
-        // Reports the read loop's terminal outcome to `Connection::wait`.
-        let (done_tx, done_rx) = oneshot::channel::<Result<(), Error>>();
-
-        // Write Loop
-        let encrypt_cypher_for_write = encrypt_cypher;
-        tokio::spawn(async move {
-            loop {
-                // Wait for any new message
-                let answer_message = tokio::select! {
-                    biased; // Poll cancellation_write_rx first
-                    cancel_message = &mut cancellation_write_rx => {
-                        match cancel_message {
-                            Ok(reason) => debug!("Write loop received cancellation signal ({reason}), exiting."),
-                            Err(_) => debug!("Write loop cancellation channel dropped, exiting."),
-                        }
-                        break;
-                    }
-                    message = answer_messages_rx.recv() => match message {
-                        Some(message) => message,
-                        None => {
-                            debug!("Write loop: all senders dropped, exiting.");
-                            break;
+        // Handshake: all the protocol logic lives in the state machine; this
+        // loop only moves bytes until it reports the connection as established.
+        let mut first_read = true;
+        loop {
+            match protocol.poll() {
+                Ok(Some(Event::Connected)) => break,
+                Ok(Some(Event::Transmit(bytes))) => {
+                    if let Err(err) = write_frame(&mut writer, &bytes).await {
+                        if protocol.is_closed() {
+                            // Farewell for a rejected peer: best effort, the
+                            // rejection itself is what gets reported.
+                            debug!("failed to send error frame to peer: {:?}", err);
+                        } else {
+                            return Err(handshake_io_err(err));
                         }
                     }
-                };
-
-                debug!("Answer message: {:?}", answer_message);
-
-                let packet = if plaintext_communication {
-                    match packet_plaintext::message_to_packet(&answer_message) {
-                        Ok(packet) => packet,
-                        Err(e) => {
-                            error!("Write loop: failed to encode outgoing message: {e}");
-                            break;
-                        }
-                    }
-                } else {
-                    let mut encrypt_cipher_changer = encrypt_cypher_for_write.lock().await;
-                    let cipher = match encrypt_cipher_changer.as_mut() {
-                        Some(cipher) => cipher,
-                        None => {
-                            error!("Write loop: encryption cipher not initialized, exiting.");
-                            break;
-                        }
-                    };
-                    match packet_encrypted::message_to_packet(&answer_message, cipher) {
-                        Ok(packet) => packet,
-                        Err(e) => {
-                            error!("Write loop: failed to encode outgoing message: {e}");
-                            break;
-                        }
-                    }
-                };
-
-                if let Err(e) = writer.send(packet).await {
-                    if is_peer_gone(&e) {
-                        debug!("Write loop: peer gone while sending, exiting.");
-                    } else {
-                        error!("Write loop: failed to send message: {e}");
-                    }
-                    break;
                 }
-                if let Err(e) = writer.flush().await {
-                    if is_peer_gone(&e) {
-                        debug!("Write loop: peer gone while flushing, exiting.");
-                    } else {
-                        error!("Write loop: failed to flush message: {e}");
-                    }
-                    break;
-                }
-
-                if matches!(answer_message, ProtoMessage::DisconnectResponse(_)) {
-                    debug!("Disconnecting");
-                    let mut tcp_write = writer.into_inner();
-                    if let Err(err) = tcp_write.shutdown().await {
+                Ok(Some(Event::Close)) => {
+                    if let Err(err) = writer.shutdown().await {
                         error!("failed to shutdown socket: {:?}", err);
                     }
-                    break;
                 }
-            }
-        });
-
-        // Clone all necessary data before spawning the task
-        let answer_messages_tx_clone = answer_messages_tx.clone();
-        // Read Loop
-        tokio::spawn(async move {
-            let outcome: Result<(), Error> = async move {
-                let mut disconnect_requested = false;
-                loop {
-                    let frame = match reader.next().await {
-                        None => {
-                            return Err(Error::Disconnected(if disconnect_requested {
-                                DisconnectReason::Requested
-                            } else {
-                                DisconnectReason::Eof
-                            }));
-                        }
-                        Some(Ok(frame)) => frame,
-                        Some(Err(e)) => return Err(classify_read_error(e)),
-                    };
-                    trace!("TCP Receive: {:02X?}", &frame);
-
-                    let decoded = if encrypted {
-                        let mut decrypt_cipher_changer = decrypt_cypher.lock().await;
-                        match decrypt_cipher_changer.as_mut() {
-                            Some(cipher) => packet_encrypted::packet_to_message(&frame, cipher),
-                            None => Err(FrameError::Malformed(
-                                "decryption cipher not initialized".to_string(),
-                            )),
-                        }
-                    } else {
-                        packet_plaintext::packet_to_message(&frame)
-                    };
-
-                    let message = match decoded {
-                        Ok(message) => message,
-                        // Forward-compatible: an unknown message type (for example
-                        // one introduced by a newer ESPHome release) is skipped so
-                        // the connection stays healthy instead of being torn down.
-                        Err(FrameError::UnknownMessageType(message_type)) => {
-                            debug!("Ignoring unknown message type {message_type}");
-                            continue;
-                        }
-                        Err(e) => return Err(e.into()),
-                    };
-
-                    // Protocol-level messages we answer ourselves produce a
-                    // response; everything else is forwarded to the consumer.
-                    let response: Option<ProtoMessage> = match &message {
-                        ProtoMessage::DisconnectRequest(disconnect_request) => {
-                            debug!("DisconnectRequest: {:?}", disconnect_request);
-                            disconnect_requested = true;
-                            Some(ProtoMessage::DisconnectResponse(DisconnectResponse {}))
-                        }
-                        ProtoMessage::PingRequest(ping_request) => {
-                            debug!("PingRequest: {:?}", ping_request);
-                            Some(ProtoMessage::PingResponse(PingResponse {}))
-                        }
-                        ProtoMessage::DeviceInfoRequest(device_info_request) => {
-                            debug!("DeviceInfoRequest: {:?}", device_info_request);
-                            Some(ProtoMessage::DeviceInfoResponse(device_info.clone()))
-                        }
-                        ProtoMessage::HelloRequest(hello_request) => {
-                            debug!("HelloRequest: {:?}", hello_request);
-                            Some(ProtoMessage::HelloResponse(hello_response.clone()))
-                        }
-                        ProtoMessage::AuthenticationRequest(authentication_request) => {
-                            debug!("AuthenticationRequest: {:?}", authentication_request);
-                            if !authentication_request.password.is_empty() {
-                                info!("Password Authentication is not supported");
-                                None
-                            } else {
-                                Some(ProtoMessage::AuthenticationResponse(
-                                    AuthenticationResponse {
-                                        invalid_password: false,
-                                    },
-                                ))
+                // Messages are only produced once the connection is established.
+                Ok(Some(Event::Message(_))) => {}
+                Ok(None) => {
+                    let read = reader.read(&mut buffer).await.map_err(|err| {
+                        if first_read {
+                            handshake_io_err(err)
+                        } else {
+                            // A mid-handshake disconnect is an aborted handshake.
+                            match classify_read_error(err) {
+                                Error::Disconnected(_) => HandshakeError::Aborted.into(),
+                                other => other,
                             }
                         }
-                        other => {
-                            // No active receivers is normal (the consumer dropped
-                            // its handle); the message is simply dropped.
-                            let _ = outgoing_messages_tx.send(other.clone());
-                            None
-                        }
-                    };
-
-                    if let Some(response) = response
-                        && answer_messages_tx_clone.send(response).await.is_err()
-                    {
-                        // The write loop has stopped; the connection is finished.
-                        return Err(Error::Disconnected(if disconnect_requested {
-                            DisconnectReason::Requested
-                        } else {
-                            DisconnectReason::WriteClosed
-                        }));
+                    })?;
+                    first_read = false;
+                    if read == 0 {
+                        return Err(eof_error(&mut protocol));
                     }
+                    protocol.receive(&buffer[..read]);
+                }
+                Err(e) => {
+                    error!("API Failure: {}. Disconnecting.", e);
+                    return Err(e);
                 }
             }
+        }
+
+        // Reports the connection's terminal outcome to `Connection::wait`.
+        let (done_tx, done_rx) = oneshot::channel::<Result<(), Error>>();
+
+        tokio::spawn(async move {
+            let outcome = run_connection(
+                protocol,
+                reader,
+                writer,
+                answer_messages_rx,
+                outgoing_messages_tx,
+                buffer,
+            )
             .await;
 
             match &outcome {
-                Ok(()) => {}
-                Err(Error::Disconnected(reason)) => info!("Read loop stopped: {reason}"),
-                Err(e) => error!("Read loop stopped with error: {e}"),
+                Error::Disconnected(reason) => info!("Connection closed: {reason}"),
+                e => error!("Connection stopped with error: {e}"),
             }
-            // If sending fails, the write loop is probably already closed.
-            let _ = cancellation_write_tx.send("read loop finished");
             // Report the terminal outcome to the consumer (ignored if dropped).
-            let _ = done_tx.send(outcome);
+            let _ = done_tx.send(Err(outcome));
         });
 
         Ok(Connection::new(

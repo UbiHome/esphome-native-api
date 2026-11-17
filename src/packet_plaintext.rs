@@ -1,3 +1,6 @@
+use alloc::string::ToString;
+use alloc::vec::Vec;
+
 use log::debug;
 
 use crate::error::FrameError;
@@ -20,14 +23,17 @@ pub(crate) fn message_to_packet(message: &ProtoMessage) -> Result<Vec<u8>, Frame
         parser::proto_to_vec(message).map_err(|e| FrameError::Malformed(e.to_string()))?;
     let message_type =
         parser::message_to_num(message).map_err(|e| FrameError::Malformed(e.to_string()))?;
-    let message_bit: Vec<u8> = vec![message_type];
-
-    Ok([message_bit, response_content].concat())
+    let mut packet = Vec::with_capacity(1 + response_content.len());
+    packet.push(message_type);
+    packet.extend_from_slice(&response_content);
+    Ok(packet)
 }
 
 #[cfg(test)]
 mod tests {
     use test_log::test;
+
+    use alloc::vec;
 
     use crate::proto::HelloRequest;
 
@@ -49,6 +55,30 @@ mod tests {
             }
             _ => panic!("Expected HelloRequest message"),
         }
+    }
+
+    #[test]
+    fn empty_frame_is_malformed() {
+        assert!(matches!(
+            packet_to_message(&[]),
+            Err(FrameError::Malformed(_))
+        ));
+    }
+
+    #[test]
+    fn unknown_message_type_is_reported() {
+        assert!(matches!(
+            packet_to_message(&[0x7F]),
+            Err(FrameError::UnknownMessageType(127))
+        ));
+    }
+
+    #[test]
+    fn undecodable_payload_is_reported_with_its_type() {
+        assert!(matches!(
+            packet_to_message(&[0x01, 0xFF]),
+            Err(FrameError::Decode { message_type: 1 })
+        ));
     }
 
     #[test]

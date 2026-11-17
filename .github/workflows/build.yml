@@ -120,6 +120,20 @@ jobs:
           args: '--verbose --locked'
           strip: false
 
+      # The protocol core must keep working without tokio (and thereby std).
+      - name: Find default version feature
+        id: version
+        shell: bash
+        run: echo "feature=$(grep -o -m1 'version_[0-9_]*' Cargo.toml | head -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Test protocol core without std
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: test
+          target: ${{ matrix.platform.target }}
+          args: '--verbose --locked --no-default-features --features protocol,${{ steps.version.outputs.feature }}'
+          strip: false
+
   e2e-test:
     name: E2E Test
     needs: generate_protos
